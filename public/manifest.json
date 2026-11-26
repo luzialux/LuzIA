@@ -1,0 +1,16 @@
+{
+  "name": "Luz em Casa",
+  "short_name": "Luz em Casa",
+  "description": "Consumos de eletricidade — a tua casa, o vizinho e quem mais vier",
+  "start_url": "./",
+  "scope": "./",
+  "id": "./",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#F59E0B",
+  "lang": "pt-PT",
+  "icons": [
+    { "src": "./icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "./icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" }
+  ]
+}
