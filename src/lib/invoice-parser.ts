@@ -136,53 +136,93 @@ function acharDatas(chao: string): DataAchada[] {
 const PALAVRAS_PERIODO = [
   "periodo de faturacao", "periodos de faturacao", "periodo de consumo",
   "periodo facturado", "periodo faturado", "periodo de fornecimento",
-  "periodo de leitura", "periodo de fatura",
+  "periodo de leitura", "periodo de fatura", "consumo no periodo",
+  "consumo entre", "dias de consumo", "dias faturados",
+  "leituras do periodo", "leitura anterior",
 ];
+
+// datas que NÃO são do período de consumo: a data de emissão, o prazo de
+// pagamento, a próxima leitura, o fim do contrato, etc. Esta lista é a que
+// evita o pior erro de todos: ler «dezembro» (o prazo de pagamento) numa
+// fatura de novembro.
+const DATA_ESTRANHA =
+  /(emiss|pague|pagar|pagamento|venc|limite|termina|valida|proximo|proxima|prevista|previsto|seguinte|garant|atest|nasc|renov|a\s*partir)/;
 
 function acharPeriodo(
   chao: string,
-  datas: DataAchada[]
+  datas: DataAchada[],
+  emissaoLim: DataAchada | null // emissão confirmada por «Data de emissão:»
 ): { inicio: DataAchada | null; fim: DataAchada | null; como: string } {
+  const contextoAntes = (d: DataAchada) => chao.slice(Math.max(0, d.idx - 32), d.idx);
+  const estranha = (d: DataAchada) => DATA_ESTRANHA.test(contextoAntes(d));
+
+  // a fatura é escrita quando o período de consumo ACABA — portanto o fim do
+  // período nunca é mais de ~2 dias depois da data de emissão. Datas depois
+  // disso são o prazo de pagamento («pague até 11 dezembro») ou a próxima
+  // leitura, e nunca o mês a que a fatura diz respeito.
+  const tarde = (d: DataAchada) =>
+    emissaoLim != null &&
+    diaEmMs(d) > diaEmMs(emissaoLim) + 2 * 86400000;
+
+  const parValido = (
+    a: DataAchada, b: DataAchada, minDias: number, maxDias: number
+  ): boolean => {
+    if (diaEmMs(b) <= diaEmMs(a)) return false;
+    if (estranha(a) || estranha(b) || tarde(a) || tarde(b)) return false;
+    const dias = (diaEmMs(b) - diaEmMs(a)) / 86400000;
+    return dias >= minDias && dias <= maxDias;
+  };
+
   // 1.º tentativa: datas mesmo ao lado de "período de faturação" (ou parecido)
   for (const palavra of PALAVRAS_PERIODO) {
     let i = chao.indexOf(palavra);
     while (i !== -1) {
-      const janela = datas.filter((d) => d.idx >= i && d.idx <= i + palavra.length + 120);
-      if (janela.length >= 2) {
-        return { inicio: janela[0], fim: janela[1], como: palavra };
+      const janela = datas
+        .filter((d) => d.idx >= i && d.idx <= i + palavra.length + 120)
+        .filter((d) => !estranha(d) && !tarde(d));
+      for (let k = 0; k + 1 < janela.length; k++) {
+        if (parValido(janela[k], janela[k + 1], 15, 70)) {
+          return { inicio: janela[k], fim: janela[k + 1], como: palavra };
+        }
       }
       i = chao.indexOf(palavra, i + 1);
     }
   }
-  // 2.ª tentativa: o primeiro par de datas seguidas que pareça um mês de faturação
-  // (evita a data de emissão, a de pagamento e a do fim do contrato)
-  const contextoAntes = (d: DataAchada) => chao.slice(Math.max(0, d.idx - 32), d.idx);
-  const dataEstranha = /(emiss|pague|termina|valida|vencimento|proximo|garant|atest|nasc)/;
-  const tentativas: [number, number][] = [[20, 45], [3, 150]];
-  for (const [minDias, maxDias] of tentativas) {
-    for (let a = 0; a < datas.length; a++) {
-      if (dataEstranha.test(contextoAntes(datas[a]))) continue;
-      for (let b = a + 1; b < datas.length; b++) {
-        if (dataEstranha.test(contextoAntes(datas[b]))) continue;
-        const dias = (diaEmMs(datas[b]) - diaEmMs(datas[a])) / 86400000;
-        if (dias >= minDias && dias <= maxDias) {
-          return { inicio: datas[a], fim: datas[b], como: "duas datas seguidas" };
-        }
+  // 2.ª tentativa: o primeiro par de datas seguidas que pareça um mês de
+  // faturação (com o filtro das datas estranhas e o limite da emissão por cima)
+  const [minDias, maxDias]: [number, number] = [15, 70];
+  for (let a = 0; a < datas.length; a++) {
+    if (estranha(datas[a]) || tarde(datas[a])) continue;
+    for (let b = a + 1; b < datas.length; b++) {
+      if (estranha(datas[b]) || tarde(datas[b])) continue;
+      if (parValido(datas[a], datas[b], minDias, maxDias)) {
+        return { inicio: datas[a], fim: datas[b], como: "duas datas seguidas" };
       }
     }
   }
   return { inicio: null, fim: null, como: "" };
 }
 
-function acharEmissao(chao: string, datas: DataAchada[]): DataAchada | null {
-  for (const palavra of ["data de emissao", "data do documento", "emitida em", "emitido em", "emitida a"]) {
-    const i = chao.indexOf(palavra);
-    if (i !== -1) {
+const PALAVRAS_EMISSAO = [
+  "data de emissao", "data do documento", "emitida em", "emitido em",
+  "emitida a", "emissao da fatura", "fatura emitida", "emissao:",
+];
+
+// a data de emissão. «porPalavra» diz se foi lida de facto junto de «Data de
+// emissão:» (fiável) ou se foi um palpite (a primeira data do documento).
+function acharEmissao(
+  chao: string,
+  datas: DataAchada[]
+): { data: DataAchada | null; porPalavra: boolean } {
+  for (const palavra of PALAVRAS_EMISSAO) {
+    let i = chao.indexOf(palavra);
+    while (i !== -1) {
       const perto = datas.find((d) => d.idx >= i && d.idx <= i + palavra.length + 60);
-      if (perto) return perto;
+      if (perto) return { data: perto, porPalavra: true };
+      i = chao.indexOf(palavra, i + 1);
     }
   }
-  return datas[0] ?? null;
+  return { data: datas[0] ?? null, porPalavra: false };
 }
 
 // ---- consumo em kWh ----
@@ -190,7 +230,7 @@ function acharConsumo(chao: string): { kwh: number | null; como: string } {
   const validos: [RegExp, string][] = [
     [/consumo\s+entre\s+leituras:?\s*([\d.,\s]+?)\s*kwh/, "consumo entre leituras"],
     [/consumo\s+real\s*\(([\d.,\s]+?)\s*kwh/, "consumo real"],
-    [/consumo\s+(?:total|do\s+periodo|faturado|facturado|ativo|registado|registrado|medido|mensal):?\s*([\d.,\s]+?)\s*kwh/, "consumo do período"],
+    [/consumo\s+(?:total|do\s+periodo|no\s+periodo|faturado|facturado|ativo|registado|registrado|medido|mensal):?\s*([\d.,\s]+?)\s*kwh/, "consumo do período"],
     [/total\s+(?:de\s+)?(?:energia\s+)?consumida:?\s*([\d.,\s]+?)\s*kwh/, "total de energia consumida"],
     [/energia\s+(?:ativa\s+)?(?:consumida|faturada|facturada|el[ée]trica)[a-z ]{0,25}?:?\s*([\d.,\s]+?)\s*kwh/, "energia consumida"],
   ];
@@ -335,9 +375,16 @@ export function parseInvoiceText(bruto: string): ParsedInvoice {
   res.operatorName = detetarOperador(plano) ?? detetarOperador(chao);
   if (res.operatorName) notes.push(`Operador detetado: ${res.operatorName}.`);
 
-  // ---- datas e período ----
+  // ---- datas, emissão e período ----
+  // a emissão vem primeiro: saber quando a fatura foi escrita é o que impede
+  // de escolher o prazo de pagamento como «fim do período»
   const datas = acharDatas(chao);
-  const periodo = acharPeriodo(chao, datas);
+  const emissaoAchada = acharEmissao(chao, datas);
+  const periodo = acharPeriodo(
+    chao,
+    datas,
+    emissaoAchada.porPalavra ? emissaoAchada.data : null
+  );
   if (periodo.inicio && periodo.fim) {
     res.periodStart = dataISO(periodo.inicio.dia, periodo.inicio.mes, periodo.inicio.ano);
     res.periodEnd = dataISO(periodo.fim.dia, periodo.fim.mes, periodo.fim.ano);
@@ -351,7 +398,7 @@ export function parseInvoiceText(bruto: string): ParsedInvoice {
   }
 
   // ---- data de emissão ----
-  const emissao = acharEmissao(chao, datas);
+  const emissao = emissaoAchada.data;
   if (emissao) {
     res.issuedAt = dataISO(emissao.dia, emissao.mes, emissao.ano);
     notes.push(`Fatura emitida em ${emissao.dia}/${String(emissao.mes).padStart(2, "0")}/${emissao.ano}.`);

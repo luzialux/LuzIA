@@ -468,6 +468,8 @@ export type ExtractResult = {
   costEur: number | null;
   operatorName: string | null;
   tariff: string | null;
+  periodStart: string | null; // início do período de consumo (ISO), se leu
+  periodEnd: string | null; // fim do período de consumo (ISO), se leu
   readings: InvoiceReading[];
   readingsCheckOk: boolean;
   notes: string[];
@@ -634,6 +636,8 @@ export async function saveInvoiceParsed(
     costEur: parsed.costEur,
     operatorName: parsed.operatorName,
     tariff: parsed.tariff,
+    periodStart: parsed.periodStart,
+    periodEnd: parsed.periodEnd,
     readings: parsed.readings,
     readingsCheckOk: parsed.readingsCheckOk,
     notes: parsed.notes,
@@ -648,6 +652,79 @@ export async function deleteInvoice(id: string): Promise<void> {
   apagarRegisto("invoices", id);
   agendarEnvio();
   if (inv?.pdfUrl) void limparPdfNuvemUrl(inv.pdfUrl);
+}
+
+// corrigir à mão o que a leitura automática acertou mal: o mês, o ano, o
+// consumo ou o valor. Se o mês muda, o registo do mês muda com ele — nada
+// fica no sítio errado, aqui nem nos outros aparelhos.
+export async function updateInvoice(
+  id: string,
+  dados: { year: number; month: number; kwh: number | null; costEur: number | null }
+): Promise<void> {
+  const d = db();
+  const inv = await d.invoices.get(id);
+  if (!inv) throw new Error("Fatura não encontrada.");
+  const agora = new Date().toISOString();
+  const mesmaData = inv.year === dados.year && inv.month === dados.month;
+
+  if (!mesmaData) {
+    const ocupada = await d.invoices
+      .where("[houseId+year+month]")
+      .equals([inv.houseId, dados.year, dados.month])
+      .first();
+    if (ocupada && ocupada.id !== id) {
+      throw new Error(
+        `Já há uma fatura de ${String(dados.month).padStart(2, "0")}/${dados.year} nesta casa. Apaga-a primeiro, se a quiseres substituir.`
+      );
+    }
+  }
+
+  await d.invoices.put({ ...inv, ...dados, updatedAt: agora });
+  marcarDirty("invoices", id);
+
+  // 1) o registo do mês antigo: se os valores lá eram os que a fatura pôs,
+  //    saem; se tinha outras coisas (uma leitura de contador, por exemplo),
+  //    só perde o que era da fatura
+  if (!mesmaData) {
+    const antigo = await d.readings
+      .where("[houseId+year+month]")
+      .equals([inv.houseId, inv.year, inv.month])
+      .first();
+    if (antigo) {
+      const kwhFicou = antigo.kwh != null && antigo.kwh !== inv.kwh ? antigo.kwh : null;
+      const custoFicou =
+        antigo.costEur != null && antigo.costEur !== inv.costEur ? antigo.costEur : null;
+      if (kwhFicou == null && custoFicou == null && antigo.counterValue == null) {
+        await d.readings.delete(antigo.id);
+        apagarRegisto("readings", antigo.id);
+      } else {
+        await d.readings.put({ ...antigo, kwh: kwhFicou, costEur: custoFicou, updatedAt: agora });
+        marcarDirty("readings", antigo.id);
+      }
+    }
+  }
+
+  // 2) o registo do mês certo recebe os valores corrigidos
+  const casa = await d.houses.get(inv.houseId);
+  const alvo = await d.readings
+    .where("[houseId+year+month]")
+    .equals([inv.houseId, dados.year, dados.month])
+    .first();
+  const registo: Reading = {
+    id: alvo?.id ?? crypto.randomUUID(),
+    houseId: inv.houseId,
+    houseName: casa?.name ?? inv.houseName,
+    houseColor: casa?.color ?? inv.houseColor,
+    year: dados.year,
+    month: dados.month,
+    kwh: dados.kwh ?? alvo?.kwh ?? null,
+    costEur: dados.costEur ?? alvo?.costEur ?? null,
+    counterValue: alvo?.counterValue ?? null,
+    updatedAt: agora,
+  };
+  await d.readings.put(registo);
+  marcarDirty("readings", registo.id);
+  agendarEnvio();
 }
 
 export async function getInvoicePdfUrl(id: string): Promise<string | null> {

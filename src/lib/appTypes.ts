@@ -78,6 +78,8 @@ export type ExtractedInvoice = {
   costEur: number | null;
   operatorName: string | null;
   tariff: string | null;
+  periodStart: string | null; // início do período de consumo (ISO), se leu
+  periodEnd: string | null; // fim do período de consumo (ISO), se leu
   readings: InvoiceReading[];
   readingsCheckOk: boolean;
   notes: string[];

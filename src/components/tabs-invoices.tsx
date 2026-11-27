@@ -2,11 +2,13 @@
 
 import * as React from "react";
 import {
-  CheckCircle2, ExternalLink, FileText, Loader2, Trash2, Upload,
+  CheckCircle2, ExternalLink, FileText, Loader2, Pencil, Trash2, Upload,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
@@ -22,6 +24,7 @@ import type { ExtractedInvoice, House, Invoice, Operator } from "@/lib/appTypes"
 import type { ParsedInvoice } from "@/lib/invoice-parser";
 import {
   deleteInvoice, getInvoicePdfUrl, parsePdfInvoice, saveInvoiceParsed,
+  updateInvoice,
 } from "@/lib/localdb";
 
 // cores de marca conhecidas (para o badge do operador)
@@ -50,6 +53,64 @@ export function InvoicesTab({
   const [fase, setFase] = React.useState<"texto" | "ocr">("texto");
   const [extracted, setExtracted] = React.useState<ExtractedInvoice | null>(null);
   const [deleting, setDeleting] = React.useState<Invoice | null>(null);
+
+  // corrigir uma fatura que já está no arquivo (o lápis)
+  const [editando, setEditando] = React.useState<Invoice | null>(null);
+  const [editMes, setEditMes] = React.useState("1");
+  const [editAno, setEditAno] = React.useState("2026");
+  const [editKwh, setEditKwh] = React.useState("");
+  const [editCusto, setEditCusto] = React.useState("");
+  const [aGuardar, setAGuardar] = React.useState(false);
+  const agora = new Date();
+  const anosEdit = Array.from(
+    { length: agora.getFullYear() + 1 - 2022 },
+    (_, i) => 2022 + i
+  );
+
+  function abrirEdicao(inv: Invoice) {
+    setEditando(inv);
+    setEditMes(String(inv.month).padStart(2, "0"));
+    setEditAno(String(inv.year));
+    setEditKwh(inv.kwh == null ? "" : String(inv.kwh));
+    setEditCusto(inv.costEur == null ? "" : String(inv.costEur).replace(".", ","));
+  }
+
+  async function guardarEdicao() {
+    if (!editando) return;
+    setAGuardar(true);
+    try {
+      const kwhBruto = editKwh.trim() ? Number(editKwh.replace(",", ".")) : null;
+      const custoBruto = editCusto.trim() ? Number(editCusto.replace(",", ".")) : null;
+      if ((kwhBruto != null && Number.isNaN(kwhBruto)) || (custoBruto != null && Number.isNaN(custoBruto))) {
+        throw new Error("O consumo e o valor têm de ser números (ex.: 400 ou 43,32).");
+      }
+      const antes = monthLabelLong(editando.year, editando.month);
+      await updateInvoice(editando.id, {
+        year: Number(editAno),
+        month: Number(editMes),
+        kwh: kwhBruto,
+        costEur: custoBruto,
+      });
+      const depois = monthLabelLong(Number(editAno), Number(editMes));
+      toast({
+        title: antes === depois ? "Fatura corrigida" : "Fatura movida",
+        description:
+          antes === depois
+            ? "Os valores do mês ficaram atualizados."
+            : `Estava em ${antes} e agora está em ${depois} — o registo do mês mudou com ela.`,
+      });
+      setEditando(null);
+      onRefresh();
+    } catch (e) {
+      toast({
+        title: "Não foi possível guardar",
+        description: e instanceof Error ? e.message : undefined,
+        variant: "destructive",
+      });
+    } finally {
+      setAGuardar(false);
+    }
+  }
 
   React.useEffect(() => {
     if (!houseId && houses.length > 0) setHouseId(houses[0].id);
@@ -262,7 +323,19 @@ export function InvoicesTab({
               <ul className="mt-2 space-y-1 text-sm text-muted-foreground">
                 <li>
                   Mês: <strong className="text-foreground">{monthLabelLong(extracted.year, extracted.month)}</strong>
+                  {extracted.mesEstimadoPor && (
+                    <span className="text-xs"> (estimado por {extracted.mesEstimadoPor})</span>
+                  )}
                 </li>
+                {extracted.periodStart && extracted.periodEnd && (
+                  <li>
+                    Período de consumo: {""}
+                    <strong className="text-foreground">
+                      {new Date(extracted.periodStart).toLocaleDateString("pt-PT")} a{" "}
+                      {new Date(extracted.periodEnd).toLocaleDateString("pt-PT")}
+                    </strong>
+                  </li>
+                )}
                 <li>
                   Consumo: <strong className="text-foreground">{fmtKwh(extracted.kwh)}</strong>
                   {" — "}Valor: <strong className="text-foreground">{fmtEur(extracted.costEur)}</strong>
@@ -355,6 +428,16 @@ export function InvoicesTab({
                         variant="ghost"
                         size="icon"
                         className="h-9 w-9"
+                        aria-label={`Corrigir a fatura de ${monthLabelLong(inv.year, inv.month)}`}
+                        title="Corrigir mês, consumo ou valor"
+                        onClick={() => abrirEdicao(inv)}
+                      >
+                        <Pencil className="h-4 w-4" aria-hidden />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-9 w-9"
                         aria-label={`Abrir o PDF de ${monthLabelLong(inv.year, inv.month)}`}
                         title="Abrir o PDF"
                         onClick={async () => {
@@ -437,6 +520,93 @@ export function InvoicesTab({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* corrigir mês / consumo / valor de uma fatura arquivada */}
+      <Dialog open={editando != null} onOpenChange={(o) => !o && setEditando(null)}>
+        <DialogContent className="@min-[640px]:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Corrigir a fatura</DialogTitle>
+            <DialogDescription>
+              {editando && (
+                <>
+                  {editando.houseName} · {editando.fileName}. Se o mês saiu mal
+                  da leitura, diz-me aqui para que mês é esta fatura — o registo
+                  do mês muda com ela.
+                </>
+              )}
+            </DialogDescription>
+          </DialogHeader>
+          {editando && editando.notes.length > 0 && (
+            <p className="max-h-24 overflow-y-auto rounded-md bg-muted/60 px-3 py-2 text-xs text-muted-foreground">
+              {editando.notes.join(" ")}
+            </p>
+          )}
+          <div className="grid gap-4">
+            <div className="grid grid-cols-2 gap-4">
+              <div className="grid gap-2">
+                <Label htmlFor="edit-mes">Mês a que a fatura diz respeito</Label>
+                <Select value={editMes} onValueChange={setEditMes}>
+                  <SelectTrigger id="edit-mes" className="h-11">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {MESES.map((m, i) => (
+                      <SelectItem key={m} value={String(i + 1).padStart(2, "0")}>
+                        {m[0].toUpperCase() + m.slice(1)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="edit-ano">Ano</Label>
+                <Select value={editAno} onValueChange={setEditAno}>
+                  <SelectTrigger id="edit-ano" className="h-11">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {anosEdit.map((y) => (
+                      <SelectItem key={y} value={String(y)}>
+                        {y}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="grid gap-2">
+                <Label htmlFor="edit-kwh">Consumo (kWh)</Label>
+                <Input
+                  id="edit-kwh"
+                  inputMode="decimal"
+                  placeholder="ex.: 400"
+                  value={editKwh}
+                  onChange={(e) => setEditKwh(e.target.value)}
+                  className="h-11"
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="edit-custo">Valor pago (€)</Label>
+                <Input
+                  id="edit-custo"
+                  inputMode="decimal"
+                  placeholder="ex.: 43,32"
+                  value={editCusto}
+                  onChange={(e) => setEditCusto(e.target.value)}
+                  className="h-11"
+                />
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditando(null)}>Cancelar</Button>
+            <Button onClick={guardarEdicao} disabled={aGuardar}>
+              {aGuardar ? "A guardar…" : "Guardar correção"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

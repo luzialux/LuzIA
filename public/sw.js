@@ -1,6 +1,6 @@
 // Service worker da LuzIA — deixa a app instalar-se no telemóvel e
 // abrir mesmo sem internet (usa a última cópia guardada).
-const CACHE = "luzia-v4";
+const CACHE = "luzia-v5";
 
 self.addEventListener("install", () => {
   self.skipWaiting();
