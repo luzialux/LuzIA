@@ -78,7 +78,9 @@ function num(texto: string): number | null {
 }
 
 function dataISO(dia: number, mes: number, ano: number): string {
-  return new Date(Date.UTC(ano, mes - 1, Math.min(dia, 28), 12)).toISOString();
+  // último dia real do mês — 31/12 fica 31/12 (não um 28 capado)
+  const ultimo = new Date(Date.UTC(ano, mes, 0)).getUTCDate();
+  return new Date(Date.UTC(ano, mes - 1, Math.min(dia, ultimo), 12)).toISOString();
 }
 
 // ---- tirar os acentos (comprimento mantém-se, para os índices baterem) ----
@@ -114,6 +116,41 @@ function acharDatas(chao: string): DataAchada[] {
     }
   };
 
+  // ---- intervalos com UM só ano no fim (a EDP escreve assim) ----
+  // "Período de faturação: 21 de outubro a 20 de novembro 2026"
+  // "21 out a 20 nov 2026"
+  for (const m of chao.matchAll(
+    /(\d{1,2})\s+(?:de\s+)?([a-z]{3,10})\.?\s*(?:a|até|ate|—|–|-)\s*(\d{1,2})\s+(?:de\s+)?([a-z]{3,10})\.?(?:\s+(?:de\s+)?(\d{4}))?/g
+  )) {
+    const mes1 = mesNum(m[2]);
+    const mes2 = mesNum(m[4]);
+    if (!mes1 || !mes2) continue;
+    let ano = m[5] ? +m[5] : 0;
+    if (!ano) {
+      // sem ano no fim: procura um de 4 dígitos logo a seguir
+      const depois = chao.slice((m.index ?? 0) + m[0].length, (m.index ?? 0) + m[0].length + 12);
+      const a = depois.match(/(?:\s*(?:de\s+)?)?(\d{4})/);
+      if (a) ano = +a[1];
+    }
+    if (!(ano >= 2000 && ano <= 2099)) continue;
+    const comeco = m.index ?? 0;
+    // o dia do fim vem sempre depois do mês do início (meses não têm números)
+    const idxFim = comeco + m[0].indexOf(m[3], m[0].indexOf(m[2]));
+    push(comeco, +m[1], mes1, ano, idxFim - comeco);
+    push(idxFim, +m[3], mes2, ano, m[0].length - (idxFim - comeco));
+  }
+  // "21/10 a 20/11/2026" — intervalo numérico com um só ano no fim
+  for (const m of chao.matchAll(
+    /(\d{1,2})\s*[/\-.]\s*(\d{1,2})\s*(?:a|até|ate|—|–|-)\s*(\d{1,2})\s*[/\-.]\s*(\d{1,2})\s*[/\-.]\s*(\d{2,4})/g
+  )) {
+    let ano = +m[5];
+    if (ano < 100) ano += 2000;
+    const comeco = m.index ?? 0;
+    const idxFim = comeco + m[0].indexOf(m[3], m[0].indexOf(m[2]));
+    push(comeco, +m[1], +m[2], ano, idxFim - comeco);
+    push(idxFim, +m[3], +m[4], ano, m[0].length - (idxFim - comeco));
+  }
+
   // "2026-11-20"
   for (const m of chao.matchAll(/(\d{4})\s*[/\-.]\s*(\d{1,2})\s*[/\-.]\s*(\d{1,2})/g)) {
     push(m.index, +m[3], +m[2], +m[1], m[0].length);
@@ -146,7 +183,7 @@ const PALAVRAS_PERIODO = [
 // evita o pior erro de todos: ler «dezembro» (o prazo de pagamento) numa
 // fatura de novembro.
 const DATA_ESTRANHA =
-  /(emiss|pague|pagar|pagamento|venc|limite|termina|valida|proximo|proxima|prevista|previsto|seguinte|garant|atest|nasc|renov|a\s*partir)/;
+  /(emiss|emitid|pague|pagar|pagamento|debito|venc|limite|termina|valida|proximo|proxima|prevista|previsto|seguinte|garant|atest|nasc|renov|a\s*partir|vigor\w*\s*ate)/;
 
 function acharPeriodo(
   chao: string,
@@ -204,7 +241,8 @@ function acharPeriodo(
 }
 
 const PALAVRAS_EMISSAO = [
-  "data de emissao", "data do documento", "emitida em", "emitido em",
+  "documento emitido a", "emitido a", "emitido em",
+  "data de emissao", "data do documento", "emitida em",
   "emitida a", "emissao da fatura", "fatura emitida", "emissao:",
 ];
 
@@ -244,6 +282,11 @@ function acharConsumo(chao: string): { kwh: number | null; como: string } {
   // "consumo de eletricidade 320 kWh" (e também "320 kWh consumidos")
   const reFrente = /consumo[^\n]{0,45}?(\d{1,5}(?:\.\d{3})*(?:[.,]\d{1,3})?)\s*kwh/g;
   for (const m of chao.matchAll(reFrente)) {
+    // «consumo anual inferior a 400 kWh», «consumo médio 2331 kWh»,
+    // «consumo estimado…» — notas que não são o consumo desta fatura.
+    // E «consumo real Vazio 547 kWh» é a linha do período Vazio, não o total
+    if (/(anual|inferior|superior|estimad|isent|m[eé]di[ao]|di[aá]ri[ao]|m[eé]d\.)/.test(m[0])) continue;
+    if (/(vazio|ponta|cheias|normal)\s*:?\s*\d/.test(m[0])) continue;
     if (/(medio|diario|med\.)/.test(chao.slice(Math.max(0, m.index - 24), m.index))) continue;
     const v = num(m[1]);
     if (v != null && v > 0 && v < 10000) return { kwh: v, como: "consumo" };
@@ -267,13 +310,23 @@ function acharConsumo(chao: string): { kwh: number | null; como: string } {
   if (partes >= 2 && soma > 0 && soma < 10000) {
     return { kwh: soma, como: "soma dos consumos por período horário" };
   }
+  // "IEC 771 kWh" — o imposto especial incide sobre o consumo total da fatura
+  const mIec = chao.match(
+    /\b(?:iec|imposto especial de consumo)\s*:?\s*(\d{1,5}(?:[.,]\d{1,3})?)\s*kwh/
+  );
+  if (mIec) {
+    const v = num(mIec[1]);
+    if (v != null && v > 0 && v < 10000) {
+      return { kwh: v, como: "IEC (o imposto incide sobre o consumo total)" };
+    }
+  }
   return { kwh: null, como: "" };
 }
 
 // ---- valor da fatura ----
-function acharDinheiro(janela: string): number | null {
+function acharDinheiro(janela: string): { valor: number; ate: number } | null {
   const candidatos = [
-    janela.match(/(?:€|eur)\s*(\d{1,3}(?:[ .]\d{3})*(?:,\d{1,2})?|\d+,\d{1,2})/),
+    janela.match(/(?:€|eur)\s*(\d{1,3}(?:[ .]\d{3})*,\d{1,2}|\d+,\d{1,2})/),
     janela.match(/(\d{1,3}(?:[ .]\d{3})*,\d{2})\s*(?:€|eur)?/),
     janela.match(/(\d+,\d{2})\s*(?:€|eur)?/),
     janela.match(/(\d{1,3}(?:[ .]\d{3})+)(?:\s*(?:€|eur))/),
@@ -281,7 +334,7 @@ function acharDinheiro(janela: string): number | null {
   for (const m of candidatos) {
     if (!m) continue;
     const v = num(m[1]);
-    if (v != null && v > 0 && v < 100000) return v;
+    if (v != null && v > 0 && v < 100000) return { valor: v, ate: m.index };
   }
   return null;
 }
@@ -294,15 +347,31 @@ const PALAVRAS_VALOR = [
 ];
 
 function acharValor(chao: string): { costEur: number | null; como: string } {
+  // frases que ANUNCIAM um valor parcial — um número a seguir a isto não é
+  // o total: «o total da fatura inclui encargos… no valor de 43,32 €»
+  const VENENO =
+    /(inclui|incluem|encargos|acesso (?:às|as) redes|antes de iva|sem iva|no valor de|corresponde|referente)/;
   for (const palavra of PALAVRAS_VALOR) {
     let i = chao.indexOf(palavra);
     while (i !== -1) {
       // primeiro o que vem depois da palavra; se nada, olha um pouco para trás
-      // (algumas faturas põem o valor à esquerda do título)
+      // (algumas faturas põem o valor à esquerda do título) — mas só vale se
+      // entre a palavra e o número não houver frase de valor parcial
       const depois = acharDinheiro(chao.slice(i, i + 110));
-      if (depois != null) return { costEur: depois, como: palavra };
-      const antes = acharDinheiro(chao.slice(Math.max(0, i - 34), i));
-      if (antes != null) return { costEur: antes, como: palavra };
+      if (depois) {
+        if (!VENENO.test(chao.slice(i, i + depois.ate))) {
+          return { costEur: depois.valor, como: palavra };
+        }
+        // a frase anuncia um valor parcial («o total da fatura inclui…»):
+        // nem depois nem antes desta ocorrência é o total da fatura
+        i = chao.indexOf(palavra, i + 1);
+        continue;
+      }
+      const janelaAntes = chao.slice(Math.max(0, i - 34), i);
+      const antes = acharDinheiro(janelaAntes);
+      if (antes && !VENENO.test(janelaAntes.slice(0, antes.ate))) {
+        return { costEur: antes.valor, como: palavra };
+      }
       i = chao.indexOf(palavra, i + 1);
     }
   }
