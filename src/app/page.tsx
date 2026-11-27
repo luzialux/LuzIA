@@ -2,8 +2,8 @@
 
 import * as React from "react";
 import {
-  FileText, History, Home as HomeIcon, LayoutDashboard, Monitor, PencilLine, Scale,
-  Smartphone, Sparkles,
+  Cloud, CloudOff, FileText, History, Home as HomeIcon, LayoutDashboard, Loader2,
+  Monitor, PencilLine, RefreshCw, Scale, Smartphone, Sparkles,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -17,7 +17,10 @@ import { InvoicesTab } from "@/components/tabs-invoices";
 import { ErseTab } from "@/components/tabs-erse";
 import { PlayersTab } from "@/components/tabs-players";
 import type { House, Invoice, Operator, Reading } from "@/lib/appTypes";
-import { ensureSeed, loadAll } from "@/lib/localdb";
+import {
+  arrancarSync, ensureSeed, loadAll, onDadosRemotos, subscribeSync, syncAgora,
+  type EstadoSync,
+} from "@/lib/localdb";
 
 // caminho base (vazio na Vercel; /LuzIA no GitHub Pages)
 const BP = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
@@ -51,12 +54,30 @@ export default function Home() {
       try {
         await ensureSeed();
       } finally {
-        if (ativo) refresh();
+        if (ativo) {
+          refresh();
+          void arrancarSync(); // liga à verdade partilhada e agenda os ciclos
+        }
       }
     })();
     return () => {
       ativo = false;
     };
+  }, [refresh]);
+
+  // estado da sincronização (o pontinho no topo) e chegada de dados remotos
+  const [syncEstado, setSyncEstado] = React.useState<EstadoSync>("sincronizado");
+  const [syncUltima, setSyncUltima] = React.useState<string | null>(null);
+  React.useEffect(() => {
+    return subscribeSync((e, u) => {
+      setSyncEstado(e);
+      setSyncUltima(u);
+    });
+  }, []);
+  React.useEffect(() => {
+    return onDadosRemotos(() => {
+      void refresh();
+    });
   }, [refresh]);
 
   // vista: automática (segue o ecrã), telemóvel ou PC — fica guardada no aparelho
@@ -78,6 +99,26 @@ export default function Home() {
       // ignora: a escolha vale só para esta visita
     }
   };
+
+  // rótulo e dica do indicador de sincronização
+  const rotuloSync =
+    syncEstado === "a-sincronizar"
+      ? "A sincronizar…"
+      : syncEstado === "sem-internet"
+        ? "Sem internet"
+        : syncEstado === "erro"
+          ? "Erro — tocar p/ tentar"
+          : syncUltima
+            ? `Sincronizado ${new Date(syncUltima).toLocaleTimeString("pt-PT", { hour: "2-digit", minute: "2-digit" })}`
+            : "Sincronizado";
+  const tituloSync =
+    syncEstado === "sincronizado"
+      ? "Tudo igual em todos os aparelhos — carrega para sincronizar agora"
+      : syncEstado === "a-sincronizar"
+        ? "A trazer e a enviar a verdade partilhada…"
+        : syncEstado === "sem-internet"
+          ? "Sem internet: os registos ficam aqui e sobem sozinhos quando ela voltar"
+          : "Algo falhou — carrega para tentar de novo";
 
   return (
     <div
@@ -109,6 +150,24 @@ export default function Home() {
             </div>
           </div>
           <div className="flex shrink-0 items-center gap-2">
+            <button
+              type="button"
+              onClick={syncAgora}
+              title={tituloSync}
+              aria-live="polite"
+              className="flex h-8 items-center gap-1.5 rounded-lg border px-2 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            >
+              {syncEstado === "a-sincronizar" ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
+              ) : syncEstado === "sincronizado" ? (
+                <Cloud className="h-3.5 w-3.5 text-emerald-600" aria-hidden />
+              ) : syncEstado === "sem-internet" ? (
+                <CloudOff className="h-3.5 w-3.5" aria-hidden />
+              ) : (
+                <RefreshCw className="h-3.5 w-3.5 text-amber-600" aria-hidden />
+              )}
+              <span className="hidden @min-[640px]:inline">{rotuloSync}</span>
+            </button>
             <div className="flex items-center gap-0.5 rounded-lg border p-0.5">
               <button
                 type="button"

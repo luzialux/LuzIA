@@ -1,13 +1,13 @@
 import type { NextConfig } from "next";
 
-// A app é toda ela no navegador (IndexedDB), por isso o build gera um site
-// estático (pasta out/) que corre na Vercel, no GitHub Pages ou em qualquer
-// outro sítio. Se precisar de caminho base (ex.: /LuzIA), usa a variável
-// NEXT_PUBLIC_BASE_PATH.
+// A app agora tem uma verdade partilhada: os dados vivem no Vercel Blob
+// (via rotas /api) e sincronizam para todos os aparelhos. O IndexedDB
+// continua a ser a cópia local rápida — a app funciona offline e sincroniza
+// quando a internet volta. O caminho base (ex.: /LuzIA no GitHub Pages)
+// continua a funcionar se NEXT_PUBLIC_BASE_PATH estiver definido.
 const basePath = process.env.NEXT_PUBLIC_BASE_PATH || undefined;
 
 const nextConfig: NextConfig = {
-  output: "export",
   basePath,
   assetPrefix: basePath,
   images: { unoptimized: true },

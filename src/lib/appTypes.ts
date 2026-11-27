@@ -5,6 +5,7 @@ export type House = {
   name: string;
   color: string;
   readingsCount?: number;
+  updatedAt?: string; // sincronização: quem editou por último
 };
 
 export type Reading = {
@@ -17,6 +18,7 @@ export type Reading = {
   kwh: number | null;
   costEur: number | null;
   counterValue: number | null;
+  updatedAt?: string; // sincronização: quem editou por último
 };
 
 export type Operator = {
@@ -32,6 +34,7 @@ export type Operator = {
   conditions: string | null;
   sourceUrl: string | null;
   sortOrder: number;
+  updatedAt?: string; // sincronização: quem editou por último
 };
 
 // uma fatura guardada no arquivo
@@ -62,6 +65,9 @@ export type Invoice = {
   createdAt: string;
   // true quando o PDF está guardado neste aparelho (a fatura semeada vem sem PDF)
   hasPdf?: boolean;
+  // endereço público do PDF na nuvem — qualquer aparelho abre por aqui
+  pdfUrl?: string | null;
+  updatedAt?: string; // sincronização: quem editou por último
 };
 
 // o que a app leu sozinho de uma fatura que acabou de ser carregada

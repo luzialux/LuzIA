@@ -1,6 +1,6 @@
 // Service worker da LuzIA — deixa a app instalar-se no telemóvel e
 // abrir mesmo sem internet (usa a última cópia guardada).
-const CACHE = "luzia-v2";
+const CACHE = "luzia-v3";
 
 self.addEventListener("install", () => {
   self.skipWaiting();
@@ -22,6 +22,9 @@ self.addEventListener("fetch", (event) => {
   if (req.method !== "GET") return;
   const url = new URL(req.url);
   if (url.origin !== self.location.origin) return;
+
+  // a verdade partilhada (/api) nunca vem da cópia offline — vai sempre à rede
+  if (url.pathname.startsWith("/api/")) return;
 
   // navegação (abrir a app): internet primeiro; se estiveres sem rede, usa a
   // última cópia guardada

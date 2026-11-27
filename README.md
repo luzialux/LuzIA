@@ -10,10 +10,13 @@ da ERSE.
 
 ## Como funciona
 
-A app corre por inteiro no **telemóvel/computador**: o build é um site estático
-e os dados ficam guardados no próprio aparelho (IndexedDB), sem contas, sem
-servidor e sem base de dados na nuvem. Se a internet cair, a app continua a
-funcionar.
+A app tem **uma verdade para todos os aparelhos**: os dados (casas, consumos,
+ofertas e faturas) vivem num documento na nuvem (Vercel Blob, junto ao sítio
+onde a app está alojada) e sincronizam automaticamente entre telemóvel e
+computador — o PDF que carregas no computador aparece no telemóvel do vizinho
+em segundos, sem contas nem passwords. Cada aparelho mantém uma cópia local
+(IndexedDB): se a internet cair, a app continua a funcionar e o que registares
+sobe sozinhos quando ela volta. O que editar por último fica em todos.
 
 - **Registar** — leitura do contador (a app calcula o consumo desde a última
   leitura) ou fatura do mês (kWh e euros).
@@ -23,6 +26,8 @@ funcionar.
   Iberdrola, Plenitude, Goldenergy e outros).
 - **Casas** — adicionar/renomear casas, cores nos gráficos, cópia de segurança
   (exportar/importar um `.json` com tudo, PDFs incluídos).
+- **Sincronização** — o indicador no topo mostra o estado (Sincronizado,
+  A sincronizar…, Sem internet, Erro); tocar nele força uma sincronização.
 - **Vista telemóvel / PC** — dois botões no topo mostram a app como ela fica
   no telemóvel ou no computador, mesmo que estejas no outro aparelho (clicar
   de novo volta à vista automática).
@@ -37,17 +42,19 @@ app normal.
 
 ## Copiar os dados para outro aparelho
 
-No separador **Casas**: «Guardar cópia (.json)» no aparelho antigo e depois
-«Trazer os teus dados» no novo. Nada se duplica.
+Já não é preciso: tudo sincroniza sozinho entre aparelhos. Mesmo assim, a
+cópia de segurança continua disponível no separador **Casas**
+(«Guardar cópia (.json)»), para trazer tudo para um aparelho novo ou guardar
+fora da nuvem.
 
 ## Para desenvolver
 
 ```bash
 bun install
 bun run dev      # ambiente de desenvolvimento em localhost:3000
-bun run build    # gera o site estático na pasta out/
+bun run build    # build completo (as rotas /api correm na Vercel)
 ```
 
-Stack: Next.js (App Router, export estático), Tailwind CSS, shadcn/ui,
-Recharts, Dexie (IndexedDB) e pdf.js — a leitura das faturas corre no
-navegador.
+Stack: Next.js (App Router, rotas /api/data e /api/invoice), Tailwind CSS,
+shadcn/ui, Recharts, Dexie (IndexedDB), Vercel Blob e pdf.js — a leitura das
+faturas corre no navegador.

@@ -1,7 +1,11 @@
-// Base de dados da LuzIA — vive 100% dentro do navegador (IndexedDB).
-// Substituiu o servidor: nada se perde se a internet falhar e não há contas
-// nem bases de dados na nuvem. As regras de guardar/calcular são as mesmas
-// que a app sempre usou.
+// Base de dados da LuzIA.
+//
+// A cópia local vive no navegador (IndexedDB): é ela que a app mostra, é
+// rápida e funciona sem internet. Por cima disto corre a sincronização que
+// mantém UMA verdade para todos os aparelhos: um documento no Vercel Blob
+// (via /api/data) com tudo — casas, consumos, operadores e faturas (os PDFs
+// via /api/invoice). Cada registo leva um updatedAt e, quando dois
+// aparelhos divergem, ganha quem editou por último.
 
 import Dexie, { type Table } from "dexie";
 import type {
@@ -16,6 +20,7 @@ import seedJson from "./seed-data.json";
 
 export type LocalInvoice = Invoice & {
   pdfData?: Blob | null;
+  pdfUrl?: string | null;
   hasPdf?: boolean;
 };
 
@@ -130,16 +135,25 @@ export async function saveHouse(
   if (id) {
     const existente = await d.houses.get(id);
     if (!existente) throw new Error("Não foi possível atualizar a casa.");
-    await d.houses.put({ ...existente, name: dados.name, color: dados.color });
+    const agora = new Date().toISOString();
+    await d.houses.put({ ...existente, name: dados.name, color: dados.color, updatedAt: agora });
+    marcarDirty("houses", id);
     // o nome aparece nas leituras e faturas guardadas — atualiza também
+    const idsLeituras = await d.readings.where("houseId").equals(id).primaryKeys();
+    const idsFaturas = await d.invoices.where("houseId").equals(id).primaryKeys();
     await d.readings.where("houseId").equals(id).modify({
       houseName: dados.name,
       houseColor: dados.color,
+      updatedAt: agora,
     });
     await d.invoices.where("houseId").equals(id).modify({
       houseName: dados.name,
       houseColor: dados.color,
+      updatedAt: agora,
     });
+    for (const rid of idsLeituras) marcarDirty("readings", String(rid));
+    for (const fid of idsFaturas) marcarDirty("invoices", String(fid));
+    agendarEnvio();
     return;
   }
   const nova: DbHouse = {
@@ -147,17 +161,31 @@ export async function saveHouse(
     name: dados.name,
     color: dados.color,
     createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
   };
   await d.houses.add(nova);
+  marcarDirty("houses", nova.id);
+  agendarEnvio();
 }
 
 export async function deleteHouse(id: string): Promise<void> {
   const d = db();
+  const [idsLeituras, faturas] = await Promise.all([
+    d.readings.where("houseId").equals(id).primaryKeys(),
+    d.invoices.where("houseId").equals(id).toArray(),
+  ]);
   await d.transaction("rw", d.houses, d.readings, d.invoices, async () => {
     await d.houses.delete(id);
     await d.readings.where("houseId").equals(id).delete();
     await d.invoices.where("houseId").equals(id).delete();
   });
+  apagarRegisto("houses", id);
+  for (const rid of idsLeituras) apagarRegisto("readings", String(rid));
+  for (const f of faturas) {
+    apagarRegisto("invoices", f.id);
+    if (f.pdfUrl) void limparPdfNuvemUrl(f.pdfUrl);
+  }
+  agendarEnvio();
 }
 
 // ---- leituras / consumos mensais ----
@@ -185,8 +213,11 @@ export async function saveReadingBill(
     kwh: kwh ?? null,
     costEur: costEur ?? null,
     counterValue: existente?.counterValue ?? null,
+    updatedAt: new Date().toISOString(),
   };
   await d.readings.put(registo);
+  marcarDirty("readings", registo.id);
+  agendarEnvio();
   return { mode: "bill" };
 }
 
@@ -236,8 +267,11 @@ export async function saveReadingCounter(
     kwh: kwh ?? existente?.kwh ?? null,
     costEur: costEur ?? existente?.costEur ?? null,
     counterValue,
+    updatedAt: new Date().toISOString(),
   };
   await d.readings.put(registo);
+  marcarDirty("readings", registo.id);
+  agendarEnvio();
   return { mode: "counter", kwh, isBaseline: !previous };
 }
 
@@ -249,11 +283,15 @@ export async function updateReading(
   const d = db();
   const r = await d.readings.get(id);
   if (!r) throw new Error("Não foi possível guardar.");
-  await d.readings.put({ ...r, kwh, costEur });
+  await d.readings.put({ ...r, kwh, costEur, updatedAt: new Date().toISOString() });
+  marcarDirty("readings", id);
+  agendarEnvio();
 }
 
 export async function deleteReading(id: string): Promise<void> {
   await db().readings.delete(id);
+  apagarRegisto("readings", id);
+  agendarEnvio();
 }
 
 // ---- operadores (Ofertas) ----
@@ -265,16 +303,28 @@ export async function saveOperator(
   if (id) {
     const existente = await d.operators.get(id);
     if (!existente) throw new Error("Não foi possível guardar.");
-    await d.operators.put({ ...existente, ...dados });
+    await d.operators.put({ ...existente, ...dados, updatedAt: new Date().toISOString() });
+    marcarDirty("operators", id);
+    agendarEnvio();
     return;
   }
   const todas = await d.operators.toArray();
   const maxOrdem = todas.reduce((m, o) => Math.max(m, o.sortOrder), 0);
-  await d.operators.add({ ...dados, id: crypto.randomUUID(), sortOrder: maxOrdem + 1 });
+  const novo: Operator = {
+    ...dados,
+    id: crypto.randomUUID(),
+    sortOrder: maxOrdem + 1,
+    updatedAt: new Date().toISOString(),
+  };
+  await d.operators.add(novo);
+  marcarDirty("operators", novo.id);
+  agendarEnvio();
 }
 
 export async function deleteOperator(id: string): Promise<void> {
   await db().operators.delete(id);
+  apagarRegisto("operators", id);
+  agendarEnvio();
 }
 
 // ---- faturas: ler o PDF no próprio navegador e arquivar ----
@@ -351,7 +401,7 @@ export async function saveInvoiceFromPdf(
     .where("[houseId+year+month]")
     .equals([houseId, parsed.year, parsed.month])
     .first();
-  await d.readings.put({
+  const registo: Reading = {
     id: leituraExistente?.id ?? crypto.randomUUID(),
     houseId,
     houseName: casa.name,
@@ -361,7 +411,10 @@ export async function saveInvoiceFromPdf(
     kwh: parsed.kwh ?? leituraExistente?.kwh ?? null,
     costEur: parsed.costEur ?? leituraExistente?.costEur ?? null,
     counterValue: leituraExistente?.counterValue ?? null,
-  });
+    updatedAt: new Date().toISOString(),
+  };
+  await d.readings.put(registo);
+  marcarDirty("readings", registo.id);
 
   // 2) arquivar a fatura com o PDF dentro (o ficheiro novo substitui o antigo)
   const existente = await d.invoices
@@ -388,9 +441,13 @@ export async function saveInvoiceFromPdf(
     notes: parsed.notes,
     createdAt: existente?.createdAt ?? new Date().toISOString(),
     pdfData: file,
+    pdfUrl: null,
     hasPdf: true,
+    updatedAt: new Date().toISOString(),
   };
   await d.invoices.put(fatura);
+  marcarDirty("invoices", fatura.id);
+  agendarEnvio();
 
   return {
     month: parsed.month,
@@ -406,13 +463,18 @@ export async function saveInvoiceFromPdf(
 }
 
 export async function deleteInvoice(id: string): Promise<void> {
+  const inv = await db().invoices.get(id);
   await db().invoices.delete(id);
+  apagarRegisto("invoices", id);
+  agendarEnvio();
+  if (inv?.pdfUrl) void limparPdfNuvemUrl(inv.pdfUrl);
 }
 
 export async function getInvoicePdfUrl(id: string): Promise<string | null> {
   const inv = await db().invoices.get(id);
-  if (!inv?.pdfData) return null;
-  return URL.createObjectURL(inv.pdfData);
+  if (inv?.pdfUrl) return inv.pdfUrl;
+  if (inv?.pdfData) return URL.createObjectURL(inv.pdfData);
+  return null;
 }
 
 // ---- cópia de segurança: exportar e trazer de volta ----
@@ -450,7 +512,17 @@ export async function exportData(): Promise<string> {
       periodEnd: f.periodEnd,
       readings: f.readings,
     };
-    if (f.pdfData) item.pdfBase64 = await blobParaBase64(f.pdfData);
+    if (f.pdfData) {
+      item.pdfBase64 = await blobParaBase64(f.pdfData);
+    } else if (f.pdfUrl) {
+      // o PDF está na nuvem — trazê-lo para a cópia de segurança
+      try {
+        const res = await fetch(f.pdfUrl, { cache: "no-store" });
+        if (res.ok) item.pdfBase64 = await blobParaBase64(await res.blob());
+      } catch {
+        // sem internet: a cópia sai sem este PDF (ele fica na nuvem)
+      }
+    }
     faturas.push(item);
   }
   return JSON.stringify(
@@ -512,7 +584,14 @@ export async function importData(bruto: unknown): Promise<ImportResult> {
     throw new Error("O ficheiro não parece um export desta app (JSON inválido).");
   }
 
-  return d.transaction(
+  const idsTocadas: Record<TabelaSync, string[]> = {
+    houses: [],
+    readings: [],
+    operators: [],
+    invoices: [],
+  };
+
+  const resultado = await d.transaction(
     "rw",
     d.houses,
     d.readings,
@@ -529,18 +608,21 @@ export async function importData(bruto: unknown): Promise<ImportResult> {
         const existente = await d.houses.where("name").equals(name).first();
         if (existente) {
           if (existente.color !== color) {
-            await d.houses.put({ ...existente, color });
+            await d.houses.put({ ...existente, color, updatedAt: new Date().toISOString() });
           }
           idPorNome.set(name, existente.id);
+          idsTocadas.houses.push(existente.id);
         } else {
           const nova: DbHouse = {
             id: crypto.randomUUID(),
             name,
             color,
             createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
           };
           await d.houses.add(nova);
           idPorNome.set(name, nova.id);
+          idsTocadas.houses.push(nova.id);
           casasCriadas++;
         }
       }
@@ -567,10 +649,12 @@ export async function importData(bruto: unknown): Promise<ImportResult> {
             kwh: kwh ?? existente.kwh,
             costEur: costEur ?? existente.costEur,
             counterValue: counterValue ?? existente.counterValue,
+            updatedAt: new Date().toISOString(),
           });
+          idsTocadas.readings.push(existente.id);
           atualizados++;
         } else {
-          await d.readings.add({
+          const novoRegisto: Reading = {
             id: crypto.randomUUID(),
             houseId,
             houseName: casa?.name ?? String(r.house ?? ""),
@@ -580,7 +664,10 @@ export async function importData(bruto: unknown): Promise<ImportResult> {
             kwh,
             costEur,
             counterValue,
-          });
+            updatedAt: new Date().toISOString(),
+          };
+          await d.readings.add(novoRegisto);
+          idsTocadas.readings.push(novoRegisto.id);
           criados++;
         }
       }
@@ -604,8 +691,18 @@ export async function importData(bruto: unknown): Promise<ImportResult> {
           sourceUrl: o.sourceUrl == null ? null : String(o.sourceUrl),
           sortOrder: Number(o.sortOrder ?? 0) || 0,
         };
-        if (existente) await d.operators.put({ ...existente, ...dados });
-        else await d.operators.add({ ...dados, id: crypto.randomUUID() });
+        if (existente) {
+          await d.operators.put({ ...existente, ...dados, updatedAt: new Date().toISOString() });
+          idsTocadas.operators.push(existente.id);
+        } else {
+          const novoOper: Operator = {
+            ...dados,
+            id: crypto.randomUUID(),
+            updatedAt: new Date().toISOString(),
+          };
+          await d.operators.add(novoOper);
+          idsTocadas.operators.push(novoOper.id);
+        }
         operadores++;
       }
 
@@ -651,6 +748,7 @@ export async function importData(bruto: unknown): Promise<ImportResult> {
           hasPdf: !!pdfData,
         };
         await d.invoices.put(fatura);
+        idsTocadas.invoices.push(fatura.id);
       }
 
       return {
@@ -660,4 +758,381 @@ export async function importData(bruto: unknown): Promise<ImportResult> {
       };
     }
   );
+
+  // o que foi importado sobe para a nuvem para os outros aparelhos
+  for (const t of Object.keys(idsTocadas) as TabelaSync[]) {
+    for (const id of idsTocadas[t]) marcarDirty(t, id);
+  }
+  agendarEnvio();
+  return resultado;
+}
+
+// ============================================================
+// Sincronização — UMA verdade para todos os aparelhos
+// ============================================================
+// O documento central vive no Vercel Blob (via /api/data). A cópia local
+// (IndexedDB) continua a ser o que a app mostra — rápida e funciona sem
+// internet. Quando há internet:
+//   · cada alteração sobe para a nuvem depois de 2,5 s (para juntar toques);
+//   · a cada 30 s e sempre que a app volta ao primeiro plano, ela traz o
+//     que os outros aparelhos gravaram e junta ao local (por id; ganha o
+//     registo com o updatedAt mais recente);
+//   · os PDFs das faturas sobem para a nuvem e ficam abertos a todos.
+// Os apagados viajam como «lápides» para nada ressuscitar.
+
+type TabelaSync = "houses" | "readings" | "operators" | "invoices";
+
+const TABELAS_SYNC: TabelaSync[] = ["houses", "readings", "operators", "invoices"];
+
+type RegistoSync = Record<string, unknown> & { id: string; updatedAt?: string };
+
+type DocCentral = {
+  houses: Record<string, RegistoSync>;
+  readings: Record<string, RegistoSync>;
+  operators: Record<string, RegistoSync>;
+  invoices: Record<string, RegistoSync>;
+  deleted: { t: string; id: string; at: string }[];
+  rev: number;
+};
+
+export type EstadoSync = "sincronizado" | "a-sincronizar" | "sem-internet" | "erro";
+
+const CHAVE_FILA = "sync-fila-v1";
+const CHAVE_FEITO = "sync-feito-v1";
+
+let fila = new Map<TabelaSync, Set<string>>();
+let tumboPendentes: { t: TabelaSync; id: string; at: string }[] = [];
+let cronometro: ReturnType<typeof setTimeout> | null = null;
+let arrancou = false;
+let aCorrer = false;
+let sincInicialFeito = false;
+let estadoSync: EstadoSync = "sincronizado";
+let ultimaSyncAt: string | null = null;
+const ouvintesSync = new Set<(e: EstadoSync, ultima: string | null) => void>();
+const ouvintesDados = new Set<() => void>();
+
+function definirEstado(e: EstadoSync) {
+  if (estadoSync === e) return;
+  estadoSync = e;
+  for (const f of ouvintesSync) f(estadoSync, ultimaSyncAt);
+}
+
+// a app (cabeçalho) subscreve para mostrar o estado da sincronização
+export function subscribeSync(
+  cb: (e: EstadoSync, ultima: string | null) => void
+): () => void {
+  ouvintesSync.add(cb);
+  cb(estadoSync, ultimaSyncAt);
+  return () => ouvintesSync.delete(cb);
+}
+
+// a página mostra logo o que chegou da nuvem
+export function onDadosRemotos(cb: () => void): () => void {
+  ouvintesDados.add(cb);
+  return () => ouvintesDados.delete(cb);
+}
+
+export function estadoSyncAtual(): { estado: EstadoSync; ultima: string | null } {
+  return { estado: estadoSync, ultima: ultimaSyncAt };
+}
+
+export function syncAgora(): void {
+  if (cronometro) {
+    clearTimeout(cronometro);
+    cronometro = null;
+  }
+  void cicloSync();
+}
+
+function marcarDirty(t: TabelaSync, id: string) {
+  let s = fila.get(t);
+  if (!s) {
+    s = new Set();
+    fila.set(t, s);
+  }
+  s.add(id);
+}
+
+function apagarRegisto(t: TabelaSync, id: string) {
+  tumboPendentes.push({ t, id, at: new Date().toISOString() });
+  const s = fila.get(t);
+  if (s) {
+    s.delete(id);
+    if (s.size === 0) fila.delete(t);
+  }
+}
+
+function guardarFila() {
+  try {
+    void db().meta.put({
+      key: CHAVE_FILA,
+      value: JSON.stringify({
+        dirty: Object.fromEntries([...fila].map(([t, s]) => [t, [...s]])),
+        tumbo: tumboPendentes,
+      }),
+    });
+  } catch {
+    // fora do navegador não há fila a guardar
+  }
+}
+
+function agendarEnvio() {
+  guardarFila();
+  if (cronometro) clearTimeout(cronometro);
+  cronometro = setTimeout(() => {
+    cronometro = null;
+    void cicloSync();
+  }, 2500);
+}
+
+function isOnline(): boolean {
+  return typeof navigator === "undefined" ? false : navigator.onLine !== false;
+}
+
+function tabelaDe(t: TabelaSync): Table<RegistoSync, string> {
+  const d = db();
+  const tab =
+    t === "houses" ? d.houses : t === "readings" ? d.readings : t === "operators" ? d.operators : d.invoices;
+  return tab as unknown as Table<RegistoSync, string>;
+}
+
+async function limparPdfNuvemUrl(url: string) {
+  try {
+    await fetch(`/api/invoice?url=${encodeURIComponent(url)}`, { method: "DELETE" });
+  } catch {
+    // melhor-esforço: se falhar, o PDF velho fica lá sem incomodar
+  }
+}
+
+// sobe o PDF deste aparelho para a nuvem e guarda o url público na fatura
+async function carregarPdfNuvem(id: string): Promise<string | null> {
+  const d = db();
+  const inv = await d.invoices.get(id);
+  if (!inv?.pdfData || inv.pdfUrl) return inv?.pdfUrl ?? null;
+  const urlAntigo = inv.pdfUrl ?? null;
+  try {
+    const form = new FormData();
+    form.append("file", inv.pdfData, `${id}.pdf`);
+    form.append("pathname", `${id}-${Date.now()}`);
+    const res = await fetch("/api/invoice", { method: "POST", body: form });
+    if (!res.ok) throw new Error("falhou a subida do PDF");
+    const r = (await res.json()) as { url: string };
+    await d.invoices.put({
+      ...inv,
+      pdfUrl: r.url,
+      hasPdf: true,
+      updatedAt: inv.updatedAt ?? new Date().toISOString(),
+    });
+    if (urlAntigo) void limparPdfNuvemUrl(urlAntigo);
+    return r.url;
+  } catch {
+    return null;
+  }
+}
+
+// traz a nuvem e junta ao local (ganha o updatedAt mais recente)
+async function puxar(): Promise<DocCentral | null> {
+  const res = await fetch(`/api/data?v=${Date.now()}`, { cache: "no-store" });
+  if (!res.ok) throw new Error("falhou a leitura da nuvem");
+  const remoto = (await res.json()) as DocCentral | null;
+  if (!remoto) return null;
+
+  let mudouAlgo = false;
+
+  for (const t of TABELAS_SYNC) {
+    const mapa = remoto[t] ?? {};
+    for (const id of Object.keys(mapa)) {
+      const rem = mapa[id];
+      if (!rem || rem.id !== id) continue;
+      const remAt = typeof rem.updatedAt === "string" ? rem.updatedAt : "";
+      if (!remAt) continue;
+      const loc = (await tabelaDe(t).get(id)) as RegistoSync | undefined;
+      if (loc) {
+        const locAt = typeof loc.updatedAt === "string" ? loc.updatedAt : "";
+        if (remAt <= locAt) continue;
+      }
+      if (t === "invoices") {
+        const locInv = loc as unknown as LocalInvoice | undefined;
+        const remInv = rem as unknown as LocalInvoice;
+        const pdfUrlFinal = remInv.pdfUrl ?? locInv?.pdfUrl ?? null;
+        const novo: LocalInvoice = {
+          ...remInv,
+          pdfData: locInv?.pdfData ?? null,
+          pdfUrl: pdfUrlFinal,
+          hasPdf: !!locInv?.pdfData || !!pdfUrlFinal,
+        };
+        await tabelaDe(t).put(novo as unknown as RegistoSync);
+      } else {
+        await tabelaDe(t).put(rem);
+      }
+      mudouAlgo = true;
+    }
+  }
+
+  // o que outro aparelho apagou também se apaga aqui
+  for (const tb of remoto.deleted ?? []) {
+    if (!TABELAS_SYNC.includes(tb.t as TabelaSync)) continue;
+    const tabela = tabelaDe(tb.t as TabelaSync);
+    const loc = (await tabela.get(tb.id)) as RegistoSync | undefined;
+    if (!loc) continue;
+    const locAt = typeof loc.updatedAt === "string" ? loc.updatedAt : "";
+    if (!locAt || tb.at >= locAt) {
+      await tabela.delete(tb.id);
+      mudouAlgo = true;
+    }
+  }
+
+  if (mudouAlgo) for (const f of ouvintesDados) f();
+  return remoto;
+}
+
+function limparParaNuvem(t: TabelaSync, r: RegistoSync): RegistoSync {
+  const copia: Record<string, unknown> = { ...r };
+  delete copia.pdfData;
+  if (t === "houses") delete copia.readingsCount;
+  if (t === "invoices") copia.hasPdf = true;
+  if (!copia.updatedAt) copia.updatedAt = new Date().toISOString();
+  return copia as RegistoSync;
+}
+
+// envia o que está na fila (registos + lápides) para a nuvem
+async function enviarFila(): Promise<void> {
+  if (fila.size === 0 && tumboPendentes.length === 0) return;
+  const payload: {
+    houses?: RegistoSync[];
+    readings?: RegistoSync[];
+    operators?: RegistoSync[];
+    invoices?: RegistoSync[];
+    deleted?: { t: string; id: string; at: string }[];
+  } = {};
+  let haAlgo = false;
+  for (const t of TABELAS_SYNC) {
+    const ids = fila.get(t);
+    if (!ids || ids.size === 0) continue;
+    const lista: RegistoSync[] = [];
+    for (const id of ids) {
+      const r = await tabelaDe(t).get(id);
+      if (!r) continue;
+      lista.push(limparParaNuvem(t, r));
+    }
+    if (lista.length) {
+      payload[t] = lista;
+      haAlgo = true;
+    }
+  }
+  if (tumboPendentes.length) {
+    payload.deleted = tumboPendentes;
+    haAlgo = true;
+  }
+  if (!haAlgo) {
+    fila.clear();
+    tumboPendentes = [];
+    return;
+  }
+
+  const res = await fetch("/api/data", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error("falhou o envio para a nuvem");
+
+  fila.clear();
+  tumboPendentes = [];
+  await puxar();
+}
+
+async function cicloSync(): Promise<void> {
+  if (aCorrer) return;
+  if (!isOnline()) {
+    definirEstado("sem-internet");
+    return;
+  }
+  aCorrer = true;
+  const temTrabalho = fila.size > 0 || tumboPendentes.length > 0 || !sincInicialFeito;
+  if (temTrabalho) definirEstado("a-sincronizar");
+  const pdfFalhados: string[] = [];
+  try {
+    let feito: { value?: string } | undefined;
+    try {
+      feito = await db().meta.get(CHAVE_FEITO);
+    } catch {
+      feito = undefined;
+    }
+    const primeira = !sincInicialFeito && !feito;
+
+    if (primeira) {
+      const remoto = await puxar();
+      // migração: PDFs que só existem neste aparelho sobem para a nuvem
+      const todas = await db().invoices.toArray();
+      for (const inv of todas) {
+        if (inv.pdfData && !inv.pdfUrl) marcarDirty("invoices", inv.id);
+      }
+      // e tudo o que a nuvem ainda não conhece, sobe também
+      for (const t of TABELAS_SYNC) {
+        const todos = await tabelaDe(t).toArray();
+        for (const r of todos) {
+          if (!remoto || !remoto[t]?.[String(r.id)]) marcarDirty(t, String(r.id));
+        }
+      }
+      for (const id of [...(fila.get("invoices") ?? [])]) {
+        if ((await carregarPdfNuvem(id)) === null) pdfFalhados.push(id);
+      }
+      await enviarFila();
+    } else {
+      for (const id of [...(fila.get("invoices") ?? [])]) {
+        if ((await carregarPdfNuvem(id)) === null) pdfFalhados.push(id);
+      }
+      await puxar();
+      await enviarFila();
+    }
+
+    sincInicialFeito = true;
+    try {
+      await db().meta.put({ key: CHAVE_FEITO, value: new Date().toISOString() });
+    } catch {
+      // sem meta, tentamos de novo no próximo ciclo
+    }
+    ultimaSyncAt = new Date().toISOString();
+    definirEstado("sincronizado");
+  } catch {
+    definirEstado(isOnline() ? "erro" : "sem-internet");
+  } finally {
+    aCorrer = false;
+    // PDFs que não subiram ficam na fila para tentar outra vez
+    for (const id of pdfFalhados) marcarDirty("invoices", id);
+    guardarFila();
+  }
+}
+
+// arranca uma única vez por visita: recupera a fila pendente e agenda ciclos
+export async function arrancarSync(): Promise<void> {
+  if (arrancou || typeof window === "undefined") return;
+  arrancou = true;
+  try {
+    const m = await db().meta.get(CHAVE_FILA);
+    if (m?.value) {
+      const g = JSON.parse(m.value) as {
+        dirty?: Record<string, string[]>;
+        tumbo?: { t: TabelaSync; id: string; at: string }[];
+      };
+      if (g.dirty) {
+        for (const [t, ids] of Object.entries(g.dirty)) {
+          const s = fila.get(t as TabelaSync) ?? new Set<string>();
+          for (const id of ids) s.add(id);
+          fila.set(t as TabelaSync, s);
+        }
+      }
+      if (Array.isArray(g.tumbo)) tumboPendentes = g.tumbo;
+    }
+  } catch {
+    // sem fila guardada, seguimos
+  }
+  void cicloSync();
+  setInterval(() => void cicloSync(), 30000);
+  window.addEventListener("online", () => void cicloSync());
+  window.addEventListener("offline", () => definirEstado("sem-internet"));
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") void cicloSync();
+  });
 }

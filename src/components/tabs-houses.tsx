@@ -200,11 +200,13 @@ export function HousesTab({
       <Card>
         <CardContent className="grid gap-4 p-4 @min-[640px]:p-5">
           <div>
-            <h2 className="font-semibold">Os teus dados vivem neste aparelho</h2>
+            <h2 className="font-semibold">Uma verdade para todos os aparelhos</h2>
             <p className="mt-1 text-sm text-muted-foreground">
-              Tudo o que registas fica guardado aqui dentro — nada de contas nem de
-              nuvem. Se mudares de telemóvel, guarda uma cópia num ficheiro e traz-na
-              de volta no novo aparelho.
+              Tudo o que registas — no telemóvel, no computador ou no do vizinho —
+              aparece nos outros aparelhos em segundos, PDFs das faturas incluídos.
+              Se ficarem sem internet, os registos ficam guardados aqui dentro e
+              sobem sozinhos quando ela volta. A cópia (.json) continua a valer
+              como segurança extra para trazer tudo para um aparelho novo.
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-3">
