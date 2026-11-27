@@ -81,6 +81,7 @@ export type ExtractedInvoice = {
   readings: InvoiceReading[];
   readingsCheckOk: boolean;
   notes: string[];
+  mesEstimadoPor: string | null; // se o mês foi adivinhado, porquê
 };
 
 export const fmtFileSize = (bytes: number) =>

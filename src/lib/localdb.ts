@@ -403,7 +403,7 @@ export async function parsePdfInvoice(
         parsed: null,
         usouOcr: false,
         motivo:
-          "Este PDF está protegido por palavra-passe (algumas empresas mandam assim, com o NIF). A app não consegue abri-lo — diz-me tu os valores em baixo e a fatura fica arquivada na mesma.",
+          "Este PDF está protegido por palavra-passe (algumas empresas mandam assim, com o NIF), por isso não consegui ler os valores. A fatura fica arquivada à mesma — os valores podes preencher no registo do mês quando te apetecer.",
       };
     }
   }
@@ -427,7 +427,7 @@ export async function parsePdfInvoice(
         parsed: null,
         usouOcr: false,
         motivo:
-          "Não consegui abrir o PDF nem ler a imagem dele. Diz-me tu os valores em baixo e a fatura fica arquivada na mesma.",
+          "Não consegui abrir o PDF nem ler a imagem dele. A fatura fica arquivada à mesma — os valores podes preencher no registo do mês quando te apetecer.",
       };
     }
   }
@@ -471,11 +471,77 @@ export type ExtractResult = {
   readings: InvoiceReading[];
   readingsCheckOk: boolean;
   notes: string[];
+  mesEstimadoPor: string | null; // se o mês foi adivinhado, porquê
 };
+
+// adivinha o mês e o ano pelo NOME do ficheiro: "novembro-26.pdf" → 11/2026,
+// "fatura set 2025.pdf" → 9/2025, "fatura-09-2026.pdf" → 9/2026.
+// Devolve null se não encontrar nada que pareça um mês.
+const MESES_NOME: Record<string, number> = {
+  janeiro: 1, fevereiro: 2, marco: 3, abril: 4, maio: 5, junho: 6,
+  julho: 7, agosto: 8, setembro: 9, outubro: 10, novembro: 11, dezembro: 12,
+  jan: 1, fev: 2, mar: 3, abr: 4, mai: 5, jun: 6, jul: 7,
+  ago: 8, sept: 9, set: 9, out: 10, nov: 11, dez: 12,
+};
+
+export function mesAnoDoNome(nome: string): { month: number; year: number } | null {
+  const s = nome
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    // "setembro2026" → "setembro 2026" (separa letras de números)
+    .replace(/([a-z])(\d)/g, "$1 $2")
+    .replace(/(\d)([a-z])/g, "$1 $2");
+  const porNome =
+    "janeiro fevereiro marco abril maio junho julho agosto setembro outubro novembro dezembro " +
+    "jan fev mar abr mai jun jul ago sept set out nov dez";
+  const m = s.match(
+    new RegExp("\\b(" + porNome.replace(/ /g, "|") + ")\\s*(\\d{2,4})\\b")
+  );
+  if (m) {
+    const mes = MESES_NOME[m[1]];
+    let ano = +m[2];
+    if (m[2].length <= 2) ano += 2000;
+    if (mes && ano >= 2000 && ano <= 2099) return { month: mes, year: ano };
+  }
+  // "09 2026" (mês antes do ano) e "2026 09" (ano antes do mês)
+  const mesAno = s.match(/\b(0?[1-9]|1[0-2])\s+(\d{4})\b/);
+  if (mesAno) return { month: +mesAno[1], year: +mesAno[2] };
+  const anoMes = s.match(/\b(\d{4})\s+(0?[1-9]|1[0-2])\b/);
+  if (anoMes) return { month: +anoMes[2], year: +anoMes[1] };
+  return null;
+}
+
+// quando o PDF não disse o mês (ou disse um que não serve), tenta:
+// o que a fatura disse → o nome do ficheiro → a data de emissão → o mês de hoje
+function inferirMesAno(
+  parsed: ParsedInvoice | null,
+  fileName: string
+): { month: number; year: number; como: string } {
+  if (parsed?.month != null && parsed?.year != null) {
+    return { month: parsed.month, year: parsed.year, como: "a própria fatura" };
+  }
+  const peloNome = mesAnoDoNome(fileName);
+  if (peloNome) return { ...peloNome, como: "o nome do ficheiro" };
+  if (parsed?.issuedAt) {
+    const d = new Date(parsed.issuedAt);
+    if (!Number.isNaN(d.getTime())) {
+      return {
+        month: d.getUTCMonth() + 1,
+        year: d.getUTCFullYear(),
+        como: "a data de emissão",
+      };
+    }
+  }
+  const agora = new Date();
+  return { month: agora.getMonth() + 1, year: agora.getFullYear(), como: "o mês de hoje" };
+}
 
 // guarda a fatura no registo do mês e no arquivo (o PDF vai dentro). Os
 // valores vêm de fora: lidos do PDF pela app ou confirmados pelo utilizador
-// quando a leitura não saiu completa
+// quando a leitura não saiu completa. SEMPRE arquiva — mesmo que não tenha
+// conseguido ler os valores, o PDF nunca se atira fora.
 export async function saveInvoiceParsed(
   houseId: string,
   file: File,
@@ -493,31 +559,40 @@ export async function saveInvoiceParsed(
   if (file.size > 15 * 1024 * 1024) {
     throw new Error("O ficheiro é demasiado grande (máx. 15 MB).");
   }
-  const ano = parsed.year;
-  const mes = parsed.month;
-  if (ano == null || mes == null) {
-    throw new Error("Falta o mês a que a fatura diz respeito.");
+  // o mês: o que a fatura disse; se não disse nada, adivinha-se (nome do
+  // ficheiro, data de emissão, ou o mês de hoje) — e vai para as notas
+  const ondeMes = inferirMesAno(parsed, file.name);
+  const ano = ondeMes.year;
+  const mes = ondeMes.month;
+  if (parsed.month == null || parsed.year == null) {
+    parsed.notes = [
+      ...(parsed.notes ?? []),
+      `Mês da fatura estimado por ${ondeMes.como}: ${String(mes).padStart(2, "0")}/${ano} (não estava legível no PDF).`,
+    ];
   }
 
-  // 1) preencher o registo do mês (preservando o que já lá estava)
-  const leituraExistente = await d.readings
-    .where("[houseId+year+month]")
-    .equals([houseId, ano, mes])
-    .first();
-  const registo: Reading = {
-    id: leituraExistente?.id ?? crypto.randomUUID(),
-    houseId,
-    houseName: casa.name,
-    houseColor: casa.color,
-    year: ano,
-    month: mes,
-    kwh: parsed.kwh ?? leituraExistente?.kwh ?? null,
-    costEur: parsed.costEur ?? leituraExistente?.costEur ?? null,
-    counterValue: leituraExistente?.counterValue ?? null,
-    updatedAt: new Date().toISOString(),
-  };
-  await d.readings.put(registo);
-  marcarDirty("readings", registo.id);
+  // 1) preencher o registo do mês — só quando há valores que valham a pena
+  const temValores = parsed.kwh != null || parsed.costEur != null;
+  if (temValores) {
+    const leituraExistente = await d.readings
+      .where("[houseId+year+month]")
+      .equals([houseId, ano, mes])
+      .first();
+    const registo: Reading = {
+      id: leituraExistente?.id ?? crypto.randomUUID(),
+      houseId,
+      houseName: casa.name,
+      houseColor: casa.color,
+      year: ano,
+      month: mes,
+      kwh: parsed.kwh ?? leituraExistente?.kwh ?? null,
+      costEur: parsed.costEur ?? leituraExistente?.costEur ?? null,
+      counterValue: leituraExistente?.counterValue ?? null,
+      updatedAt: new Date().toISOString(),
+    };
+    await d.readings.put(registo);
+    marcarDirty("readings", registo.id);
+  }
 
   // 2) arquivar a fatura com o PDF dentro (o ficheiro novo substitui o antigo)
   const existente = await d.invoices
@@ -562,6 +637,8 @@ export async function saveInvoiceParsed(
     readings: parsed.readings,
     readingsCheckOk: parsed.readingsCheckOk,
     notes: parsed.notes,
+    mesEstimadoPor:
+      parsed.month == null || parsed.year == null ? ondeMes.como : null,
   };
 }
 

@@ -6,9 +6,7 @@ import {
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
@@ -52,17 +50,6 @@ export function InvoicesTab({
   const [fase, setFase] = React.useState<"texto" | "ocr">("texto");
   const [extracted, setExtracted] = React.useState<ExtractedInvoice | null>(null);
   const [deleting, setDeleting] = React.useState<Invoice | null>(null);
-  // quando a app não consegue ler a fatura toda, pede uma confirmação
-  const [fb, setFb] = React.useState<{
-    file: File;
-    parsed: ParsedInvoice | null;
-    usouOcr: boolean;
-    motivo: string | null;
-  } | null>(null);
-  const [fbMes, setFbMes] = React.useState(new Date().getMonth() + 1);
-  const [fbAno, setFbAno] = React.useState(new Date().getFullYear());
-  const [fbKwh, setFbKwh] = React.useState("");
-  const [fbCusto, setFbCusto] = React.useState("");
 
   React.useEffect(() => {
     if (!houseId && houses.length > 0) setHouseId(houses[0].id);
@@ -90,79 +77,57 @@ export function InvoicesTab({
         p.year != null &&
         (p.kwh != null || p.costEur != null);
 
-      if (leuTudo && p) {
-        const extraido = await saveInvoiceParsed(houseId, file, p);
-        setExtracted(extraido);
+      // arquiva SEMPRE — mesmo que não tenha conseguido ler os valores.
+      // Um PDF que o utilizador entregou nunca se atira fora: o mês
+      // adivinha-se pelo nome do ficheiro (ou pela emissão, ou é o de hoje)
+      // e o PDF fica no arquivo, visível em todos os aparelhos.
+      const vazio: ParsedInvoice = {
+        operatorName: null,
+        issuedAt: null,
+        periodStart: null,
+        periodEnd: null,
+        month: null,
+        year: null,
+        kwh: null,
+        costEur: null,
+        tariff: null,
+        readings: [],
+        readingsCheckOk: false,
+        notes: p
+          ? []
+          : [resultado.motivo ?? "A app não conseguiu ler os valores deste PDF."],
+      };
+      const extraido = await saveInvoiceParsed(houseId, file, p ?? vazio);
+      setExtracted(extraido);
+
+      if (leuTudo) {
         toast({
           title: resultado.usouOcr
             ? "Fatura lida à mão (OCR) e arquivada"
             : "Fatura lida e arquivada",
           description: `${MESES[extraido.month - 1]} de ${extraido.year}: ${extraido.kwh ?? "?"} kWh por ${extraido.costEur ?? "?"} €. O registo do mês ficou preenchido.${resultado.usouOcr ? " A leitura foi de imagem — confere os valores." : ""}`,
         });
-        setFile(null);
-        onRefresh();
+      } else if (p?.kwh != null || p?.costEur != null) {
+        toast({
+          title: "Fatura arquivada — li-a a meio",
+          description:
+            `${MESES[extraido.month - 1]} de ${extraido.year}` +
+            (extraido.kwh != null ? `: ${fmtKwh(extraido.kwh)}` : "") +
+            (extraido.costEur != null ? ` por ${fmtEur(extraido.costEur)}` : "") +
+            ". O PDF ficou no arquivo, visível em todos os aparelhos. O que faltou podes dizer-mo no registo do mês, sem pressa.",
+        });
       } else {
-        // não leu tudo — a app arquiva na mesma, depois de o utilizador
-        // confirmar o que falta (mês, consumo, valor)
-        setFbMes(p?.month ?? new Date().getMonth() + 1);
-        setFbAno(p?.year ?? new Date().getFullYear());
-        setFbKwh(p?.kwh != null ? String(Math.round(p.kwh)) : "");
-        setFbCusto(
-          p?.costEur != null ? String(p.costEur).replace(".", ",") : ""
-        );
-        setFb({
-          file,
-          parsed: p,
-          usouOcr: resultado.usouOcr,
-          motivo: resultado.motivo,
+        toast({
+          title: "Não consegui ler os valores — arquivada à mesma",
+          description:
+            (resultado.motivo ??
+              "Este PDF não me disse nada que eu percebesse (scansão? letra esquisita?).") +
+            (extraido.mesEstimadoPor
+              ? ` Mês estimado por ${extraido.mesEstimadoPor}: ${MESES[extraido.month - 1]} de ${extraido.year}.`
+              : "") +
+            " O PDF ficou no arquivo, visível em todos os aparelhos.",
         });
       }
-    } catch (e) {
-      toast({
-        title: "Não consegui arquivar a fatura",
-        description: e instanceof Error ? e.message : undefined,
-        variant: "destructive",
-      });
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function confirmarFb() {
-    if (!fb) return;
-    setBusy(true);
-    try {
-      const p: ParsedInvoice = fb.parsed ?? {
-        operatorName: null,
-        issuedAt: null,
-        periodStart: null,
-        periodEnd: null,
-        month: fbMes,
-        year: fbAno,
-        kwh: null,
-        costEur: null,
-        tariff: null,
-        readings: [],
-        readingsCheckOk: false,
-        notes: [],
-      };
-      p.month = fbMes;
-      p.year = fbAno;
-      const kwhNum = fbKwh.trim() ? Number(fbKwh.replace(",", ".")) : NaN;
-      const custoNum = fbCusto.trim() ? Number(fbCusto.replace(",", ".")) : NaN;
-      p.kwh = Number.isFinite(kwhNum) && kwhNum > 0 ? kwhNum : null;
-      p.costEur = Number.isFinite(custoNum) && custoNum > 0 ? custoNum : null;
-      p.notes = [
-        ...(fb.parsed?.notes ?? []),
-        "Valores confirmados por ti — a app não conseguiu ler tudo sozinha.",
-      ];
-      const extraido = await saveInvoiceParsed(houseId, fb.file, p);
-      setExtracted(extraido);
-      toast({
-        title: "Fatura arquivada",
-        description: `${MESES[extraido.month - 1]} de ${extraido.year}: ${extraido.kwh ?? "?"} kWh por ${extraido.costEur ?? "?"} €. O PDF ficou no arquivo, visível em todos os aparelhos.`,
-      });
-      setFb(null);
       setFile(null);
       onRefresh();
     } catch (e) {
@@ -210,7 +175,8 @@ export function InvoicesTab({
               A app lê o PDF sozinha — tira o mês, o consumo, o valor a pagar e as
               leituras do contador — preenche o registo e guarda a fatura no
               arquivo. Se a fatura for um scancode ou fotografia, lê a imagem à
-              mesma (OCR).
+              mesma (OCR). E se ainda assim não conseguir ler os valores, o PDF
+              fica arquivado à mesma — nunca se perde nada.
             </p>
           </div>
 
@@ -471,109 +437,6 @@ export function InvoicesTab({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-
-      {/* a app não leu a fatura toda — pede os valores que faltam e arquiva na mesma */}
-      <Dialog open={fb != null} onOpenChange={(o) => !o && setFb(null)}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle>
-              {fb?.parsed
-                ? "Não consegui ler a fatura toda"
-                : "Não consegui ler a fatura"}
-            </DialogTitle>
-            <DialogDescription>
-              {fb?.motivo ??
-                (fb?.parsed
-                  ? "Li o PDF, mas faltou qualquer coisa. Confirma os dados em baixo e a fatura fica arquivada na mesma."
-                  : "Diz-me tu os valores em baixo — a fatura fica arquivada na mesma, com o PDF visível em todos os aparelhos.")}
-            </DialogDescription>
-          </DialogHeader>
-
-          {fb?.parsed?.notes?.length ? (
-            <ul className="max-h-28 space-y-1 overflow-y-auto rounded-md bg-muted/40 p-3 text-xs text-muted-foreground">
-              {fb.parsed.notes.map((n, i) => (
-                <li key={i}>· {n}</li>
-              ))}
-            </ul>
-          ) : null}
-
-          <div className="grid grid-cols-2 gap-3">
-            <div className="grid gap-1.5">
-              <Label htmlFor="fb-mes">Mês da fatura</Label>
-              <Select value={String(fbMes)} onValueChange={(v) => setFbMes(Number(v))}>
-                <SelectTrigger id="fb-mes" className="h-11">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {MESES.map((m, i) => (
-                    <SelectItem key={m} value={String(i + 1)}>
-                      {m}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="grid gap-1.5">
-              <Label htmlFor="fb-ano">Ano</Label>
-              <Select value={String(fbAno)} onValueChange={(v) => setFbAno(Number(v))}>
-                <SelectTrigger id="fb-ano" className="h-11">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {[
-                    new Date().getFullYear() + 1,
-                    new Date().getFullYear(),
-                    new Date().getFullYear() - 1,
-                    new Date().getFullYear() - 2,
-                  ].map((a) => (
-                    <SelectItem key={a} value={String(a)}>
-                      {a}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="grid gap-1.5">
-              <Label htmlFor="fb-kwh">Consumo (kWh)</Label>
-              <Input
-                id="fb-kwh"
-                inputMode="decimal"
-                className="h-11"
-                value={fbKwh}
-                onChange={(e) => setFbKwh(e.target.value)}
-                placeholder="ex.: 320"
-              />
-            </div>
-            <div className="grid gap-1.5">
-              <Label htmlFor="fb-custo">Valor (€)</Label>
-              <Input
-                id="fb-custo"
-                inputMode="decimal"
-                className="h-11"
-                value={fbCusto}
-                onChange={(e) => setFbCusto(e.target.value)}
-                placeholder="ex.: 58,34"
-              />
-            </div>
-          </div>
-
-          <DialogFooter className="gap-2">
-            <Button variant="outline" onClick={() => setFb(null)}>
-              Descartar
-            </Button>
-            <Button onClick={confirmarFb} disabled={busy}>
-              {busy ? (
-                <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden />
-                  A guardar…
-                </>
-              ) : (
-                "Guardar na mesma"
-              )}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }
