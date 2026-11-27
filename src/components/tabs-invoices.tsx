@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import {
-  CheckCircle2, ExternalLink, FileText, Loader2, Pencil, Trash2, Upload,
+  CheckCircle2, ExternalLink, FileText, Loader2, Pencil, Trash2, TriangleAlert, Upload,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -54,8 +54,14 @@ export function InvoicesTab({
   const [extracted, setExtracted] = React.useState<ExtractedInvoice | null>(null);
   const [deleting, setDeleting] = React.useState<Invoice | null>(null);
 
-  // corrigir uma fatura que já está no arquivo (o lápis)
-  const [editando, setEditando] = React.useState<Invoice | null>(null);
+  // corrigir uma fatura que já está no arquivo (o lápis) — e tornar legível
+  // uma fatura acabada de carregar que a app não tenha lido por inteiro
+  const [editId, setEditId] = React.useState<string | null>(null);
+  const [editOrigem, setEditOrigem] = React.useState<"lapis" | "upload">("lapis");
+  const [editInfo, setEditInfo] = React.useState<{
+    casa: string; ficheiro: string; falta?: string;
+  }>({ casa: "", ficheiro: "" });
+  const [editNotas, setEditNotas] = React.useState<string[]>([]);
   const [editMes, setEditMes] = React.useState("1");
   const [editAno, setEditAno] = React.useState("2026");
   const [editKwh, setEditKwh] = React.useState("");
@@ -67,16 +73,44 @@ export function InvoicesTab({
     (_, i) => 2022 + i
   );
 
+  function preencherCampos(mes: number, ano: number, kwh: number | null, custo: number | null) {
+    setEditMes(String(mes).padStart(2, "0"));
+    setEditAno(String(ano));
+    setEditKwh(kwh == null ? "" : String(kwh));
+    setEditCusto(custo == null ? "" : String(custo).replace(".", ","));
+  }
+
+  // o lápis no cartão do arquivo
   function abrirEdicao(inv: Invoice) {
-    setEditando(inv);
-    setEditMes(String(inv.month).padStart(2, "0"));
-    setEditAno(String(inv.year));
-    setEditKwh(inv.kwh == null ? "" : String(inv.kwh));
-    setEditCusto(inv.costEur == null ? "" : String(inv.costEur).replace(".", ","));
+    setEditId(inv.id);
+    setEditOrigem("lapis");
+    setEditInfo({ casa: inv.houseName, ficheiro: inv.fileName });
+    setEditNotas(inv.notes ?? []);
+    preencherCampos(inv.month, inv.year, inv.kwh, inv.costEur);
+  }
+
+  // logo depois de carregar uma fatura que a app não leu por inteiro:
+  // a janela abre-se sozinha, já com os palpites da app preenchidos
+  function abrirLegibilizacao(
+    extraido: ExtractedInvoice,
+    casa: string,
+    ficheiro: string
+  ) {
+    const falta =
+      extraido.kwh == null && extraido.costEur == null
+        ? "os valores"
+        : extraido.kwh == null
+          ? "o consumo"
+          : "o valor";
+    setEditId(extraido.invoiceId);
+    setEditOrigem("upload");
+    setEditInfo({ casa, ficheiro, falta });
+    setEditNotas(extraido.notes ?? []);
+    preencherCampos(extraido.month, extraido.year, extraido.kwh, extraido.costEur);
   }
 
   async function guardarEdicao() {
-    if (!editando) return;
+    if (!editId) return;
     setAGuardar(true);
     try {
       const kwhBruto = editKwh.trim() ? Number(editKwh.replace(",", ".")) : null;
@@ -84,22 +118,33 @@ export function InvoicesTab({
       if ((kwhBruto != null && Number.isNaN(kwhBruto)) || (custoBruto != null && Number.isNaN(custoBruto))) {
         throw new Error("O consumo e o valor têm de ser números (ex.: 400 ou 43,32).");
       }
-      const antes = monthLabelLong(editando.year, editando.month);
-      await updateInvoice(editando.id, {
+      const invAntes = invoices.find((i) => i.id === editId);
+      const antes =
+        editOrigem === "lapis" && invAntes
+          ? monthLabelLong(invAntes.year, invAntes.month)
+          : null;
+      await updateInvoice(editId, {
         year: Number(editAno),
         month: Number(editMes),
         kwh: kwhBruto,
         costEur: custoBruto,
       });
       const depois = monthLabelLong(Number(editAno), Number(editMes));
-      toast({
-        title: antes === depois ? "Fatura corrigida" : "Fatura movida",
-        description:
-          antes === depois
-            ? "Os valores do mês ficaram atualizados."
-            : `Estava em ${antes} e agora está em ${depois} — o registo do mês mudou com ela.`,
-      });
-      setEditando(null);
+      if (editOrigem === "upload") {
+        toast({
+          title: "Fatura legível",
+          description: `${depois} ficou preenchido no registo e a fatura completa no arquivo — nada de faturas ilegíveis.`,
+        });
+      } else {
+        toast({
+          title: antes === depois ? "Fatura corrigida" : "Fatura movida",
+          description:
+            antes === depois
+              ? "Os valores do mês ficaram atualizados."
+              : `Estava em ${antes} e agora está em ${depois} — o registo do mês mudou com ela.`,
+        });
+      }
+      setEditId(null);
       onRefresh();
     } catch (e) {
       toast({
@@ -168,26 +213,32 @@ export function InvoicesTab({
             : "Fatura lida e arquivada",
           description: `${MESES[extraido.month - 1]} de ${extraido.year}: ${extraido.kwh ?? "?"} kWh por ${extraido.costEur ?? "?"} €. O registo do mês ficou preenchido.${resultado.usouOcr ? " A leitura foi de imagem — confere os valores." : ""}`,
         });
-      } else if (p?.kwh != null || p?.costEur != null) {
-        toast({
-          title: "Fatura arquivada — li-a a meio",
-          description:
-            `${MESES[extraido.month - 1]} de ${extraido.year}` +
-            (extraido.kwh != null ? `: ${fmtKwh(extraido.kwh)}` : "") +
-            (extraido.costEur != null ? ` por ${fmtEur(extraido.costEur)}` : "") +
-            ". O PDF ficou no arquivo, visível em todos os aparelhos. O que faltou podes dizer-mo no registo do mês, sem pressa.",
-        });
       } else {
-        toast({
-          title: "Não consegui ler os valores — arquivada à mesma",
-          description:
-            (resultado.motivo ??
-              "Este PDF não me disse nada que eu percebesse (scansão? letra esquisita?).") +
-            (extraido.mesEstimadoPor
-              ? ` Mês estimado por ${extraido.mesEstimadoPor}: ${MESES[extraido.month - 1]} de ${extraido.year}.`
-              : "") +
-            " O PDF ficou no arquivo, visível em todos os aparelhos.",
-        });
+        // nada de faturas ilegíveis: arquivou-se, e a janela abre-se logo
+        // para os valores serem ditos e a fatura ficar completa
+        const casaNome = houses.find((h) => h.id === houseId)?.name ?? "";
+        abrirLegibilizacao(extraido, casaNome, file.name);
+        if (p?.kwh != null || p?.costEur != null) {
+          toast({
+            title: "Fatura arquivada — li-a a meio",
+            description:
+              `${MESES[extraido.month - 1]} de ${extraido.year}` +
+              (extraido.kwh != null ? `: ${fmtKwh(extraido.kwh)}` : "") +
+              (extraido.costEur != null ? ` por ${fmtEur(extraido.costEur)}` : "") +
+              ". Diz-me o que falta na janela que se abriu — assim fica completa.",
+          });
+        } else {
+          toast({
+            title: "Arquivada — agora torna-a legível",
+            description:
+              (resultado.motivo ??
+                "Este PDF não me disse nada que eu percebesse (scansão? letra esquisita?).") +
+              (extraido.mesEstimadoPor
+                ? ` Mês estimado por ${extraido.mesEstimadoPor}: ${MESES[extraido.month - 1]} de ${extraido.year}.`
+                : "") +
+              " Preenche os valores na janela que se abriu e a fatura fica completa.",
+          });
+        }
       }
       setFile(null);
       onRefresh();
@@ -221,6 +272,10 @@ export function InvoicesTab({
   }
 
   const semCasas = houses.length === 0;
+  // faturas no arquivo a que falta qualquer coisa — não podem ficar assim
+  const nPorLegivel = invoices.filter(
+    (i) => i.kwh == null || i.costEur == null
+  ).length;
 
   return (
     <div className="flex flex-col gap-4">
@@ -237,7 +292,8 @@ export function InvoicesTab({
               leituras do contador — preenche o registo e guarda a fatura no
               arquivo. Se a fatura for um scancode ou fotografia, lê a imagem à
               mesma (OCR). E se ainda assim não conseguir ler os valores, o PDF
-              fica arquivado à mesma — nunca se perde nada.
+              fica arquivado à mesma e abre-se logo uma janela para a tornares
+              legível — nenhuma fatura fica a meio.
             </p>
           </div>
 
@@ -317,8 +373,14 @@ export function InvoicesTab({
           {extracted && (
             <div className="rounded-lg border bg-muted/40 p-4">
               <p className="flex items-center gap-1.5 font-semibold">
-                <CheckCircle2 className="h-4 w-4 text-green-600" aria-hidden />
-                O que a app preencheu sozinha:
+                {extracted.kwh != null || extracted.costEur != null ? (
+                  <CheckCircle2 className="h-4 w-4 text-green-600" aria-hidden />
+                ) : (
+                  <TriangleAlert className="h-4 w-4 text-amber-600" aria-hidden />
+                )}
+                {extracted.kwh != null || extracted.costEur != null
+                  ? "O que a app preencheu sozinha:"
+                  : "O que a app conseguiu ler:"}
               </p>
               <ul className="mt-2 space-y-1 text-sm text-muted-foreground">
                 <li>
@@ -372,6 +434,11 @@ export function InvoicesTab({
               ? `${invoices.length} ${invoices.length === 1 ? "fatura guardada" : "faturas guardadas"}`
               : ""}
           </span>
+          {nPorLegivel > 0 && (
+            <span className="ml-2 text-sm font-normal text-amber-700 dark:text-amber-400">
+              · {nPorLegivel} por tornar legível{nPorLegivel > 1 ? "es" : ""}
+            </span>
+          )}
         </h2>
       </div>
 
@@ -390,6 +457,14 @@ export function InvoicesTab({
             const corMarca =
               MARCA[inv.operatorName ?? ""] ??
               operators.find((o) => o.name === inv.operatorName)?.brandColor;
+            const faltaAqui =
+              inv.kwh == null && inv.costEur == null
+                ? "Faltam o consumo e o valor"
+                : inv.kwh == null
+                  ? "Falta o consumo"
+                  : inv.costEur == null
+                    ? "Falta o valor"
+                    : null;
             return (
               <Card key={inv.id} className="overflow-hidden">
                 <div
@@ -478,6 +553,17 @@ export function InvoicesTab({
                     </div>
                   </div>
 
+                  {faltaAqui != null && (
+                    <button
+                      type="button"
+                      onClick={() => abrirEdicao(inv)}
+                      className="flex items-center justify-center gap-1.5 rounded-md border border-amber-300/70 bg-amber-50/80 px-2.5 py-1.5 text-xs font-medium text-amber-800 transition-colors hover:bg-amber-100 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-300 dark:hover:bg-amber-500/20"
+                    >
+                      <TriangleAlert className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                      {faltaAqui} — tornar legível
+                    </button>
+                  )}
+
                   {inv.readings && inv.readings.length > 0 && (
                     <p className="text-xs text-muted-foreground">
                       Leituras:{" "}
@@ -521,24 +607,33 @@ export function InvoicesTab({
         </AlertDialogContent>
       </AlertDialog>
 
-      {/* corrigir mês / consumo / valor de uma fatura arquivada */}
-      <Dialog open={editando != null} onOpenChange={(o) => !o && setEditando(null)}>
+      {/* corrigir ou tornar legível uma fatura: mês / consumo / valor */}
+      <Dialog open={editId != null} onOpenChange={(o) => !o && setEditId(null)}>
         <DialogContent className="@min-[640px]:max-w-md">
           <DialogHeader>
-            <DialogTitle>Corrigir a fatura</DialogTitle>
+            <DialogTitle>
+              {editOrigem === "upload" ? "Torna esta fatura legível" : "Corrigir a fatura"}
+            </DialogTitle>
             <DialogDescription>
-              {editando && (
+              {editOrigem === "upload" ? (
                 <>
-                  {editando.houseName} · {editando.fileName}. Se o mês saiu mal
-                  da leitura, diz-me aqui para que mês é esta fatura — o registo
-                  do mês muda com ela.
+                  {editInfo.casa} · {editInfo.ficheiro}. A app não leu{" "}
+                  {editInfo.falta ?? "os valores"} deste PDF — diz-me aqui o mês,
+                  o consumo e o valor. A fatura fica completa e o mês fica
+                  preenchido no registo.
+                </>
+              ) : (
+                <>
+                  {editInfo.casa} · {editInfo.ficheiro}. Se o mês saiu mal da
+                  leitura, diz-me aqui para que mês é esta fatura — o registo do
+                  mês muda com ela.
                 </>
               )}
             </DialogDescription>
           </DialogHeader>
-          {editando && editando.notes.length > 0 && (
+          {editNotas.length > 0 && (
             <p className="max-h-24 overflow-y-auto rounded-md bg-muted/60 px-3 py-2 text-xs text-muted-foreground">
-              {editando.notes.join(" ")}
+              {editNotas.join(" ")}
             </p>
           )}
           <div className="grid gap-4">

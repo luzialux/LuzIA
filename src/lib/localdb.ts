@@ -462,6 +462,7 @@ export async function parsePdfInvoice(
 }
 
 export type ExtractResult = {
+  invoiceId: string; // a fatura acabada de arquivar (para a abrir logo se faltar qualquer coisa)
   month: number;
   year: number;
   kwh: number | null;
@@ -630,6 +631,7 @@ export async function saveInvoiceParsed(
   agendarEnvio();
 
   return {
+    invoiceId: fatura.id,
     month: mes,
     year: ano,
     kwh: parsed.kwh,
@@ -704,26 +706,33 @@ export async function updateInvoice(
     }
   }
 
-  // 2) o registo do mês certo recebe os valores corrigidos
+  // 2) o registo do mês certo recebe os valores corrigidos. Só se há de
+  //    facto valores para pôr lá — corrigir só o mês não cria um registo vazio
   const casa = await d.houses.get(inv.houseId);
   const alvo = await d.readings
     .where("[houseId+year+month]")
     .equals([inv.houseId, dados.year, dados.month])
     .first();
-  const registo: Reading = {
-    id: alvo?.id ?? crypto.randomUUID(),
-    houseId: inv.houseId,
-    houseName: casa?.name ?? inv.houseName,
-    houseColor: casa?.color ?? inv.houseColor,
-    year: dados.year,
-    month: dados.month,
-    kwh: dados.kwh ?? alvo?.kwh ?? null,
-    costEur: dados.costEur ?? alvo?.costEur ?? null,
-    counterValue: alvo?.counterValue ?? null,
-    updatedAt: agora,
-  };
-  await d.readings.put(registo);
-  marcarDirty("readings", registo.id);
+  const haValoresNovos = dados.kwh != null || dados.costEur != null;
+  const alvoTemAlgo =
+    alvo != null &&
+    (alvo.kwh != null || alvo.costEur != null || alvo.counterValue != null);
+  if (haValoresNovos || alvoTemAlgo) {
+    const registo: Reading = {
+      id: alvo?.id ?? crypto.randomUUID(),
+      houseId: inv.houseId,
+      houseName: casa?.name ?? inv.houseName,
+      houseColor: casa?.color ?? inv.houseColor,
+      year: dados.year,
+      month: dados.month,
+      kwh: dados.kwh ?? alvo?.kwh ?? null,
+      costEur: dados.costEur ?? alvo?.costEur ?? null,
+      counterValue: alvo?.counterValue ?? null,
+      updatedAt: agora,
+    };
+    await d.readings.put(registo);
+    marcarDirty("readings", registo.id);
+  }
   agendarEnvio();
 }
 
