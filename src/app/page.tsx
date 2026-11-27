@@ -3,7 +3,7 @@
 import * as React from "react";
 import {
   FileText, History, Home as HomeIcon, LayoutDashboard, PencilLine, Scale,
-  Sparkles, Zap,
+  Sparkles,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -18,6 +18,9 @@ import { ErseTab } from "@/components/tabs-erse";
 import { PlayersTab } from "@/components/tabs-players";
 import type { House, Invoice, Operator, Reading } from "@/lib/appTypes";
 import { ensureSeed, loadAll } from "@/lib/localdb";
+
+// caminho base (vazio na Vercel; /LuzIA no GitHub Pages)
+const BP = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
 
 export default function Home() {
   const [houses, setHouses] = React.useState<House[]>([]);
@@ -59,15 +62,15 @@ export default function Home() {
       <header className="sticky top-0 z-40 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80">
         <div className="mx-auto flex w-full max-w-6xl items-center justify-between gap-3 px-4 py-3 sm:px-6">
           <div className="flex min-w-0 items-center gap-2.5">
-            <span
+            <img
+              src={`${BP}/logo-luzia.png`}
+              alt=""
               aria-hidden
-              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-amber-500 text-black"
-            >
-              <Zap className="h-5 w-5" />
-            </span>
+              className="h-9 w-9 shrink-0 rounded-lg object-cover sm:h-10 sm:w-10"
+            />
             <div className="min-w-0">
               <h1 className="truncate text-base font-bold leading-tight sm:text-lg">
-                Luz em Casa
+                LuzIA
               </h1>
               <p className="hidden text-xs text-muted-foreground sm:block">
                 Consumos de eletricidade — a tua casa, o vizinho e quem mais vier

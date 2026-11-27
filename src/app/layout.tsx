@@ -26,7 +26,7 @@ export const viewport: Viewport = {
 };
 
 export const metadata: Metadata = {
-  title: "Luz em Casa — consumos e ofertas de eletricidade",
+  title: "LuzIA — consumos e ofertas de eletricidade",
   description:
     "Regista os consumos de eletricidade da tua casa e da do vizinho, compara em gráficos, liga ao simulador da ERSE e acompanha as ofertas dos novos players.",
   manifest: `${BP}/manifest.json`,
@@ -35,12 +35,12 @@ export const metadata: Metadata = {
       { url: `${BP}/icon-192.png`, sizes: "192x192", type: "image/png" },
       { url: `${BP}/icon-512.png`, sizes: "512x512", type: "image/png" },
     ],
-    apple: [{ url: `${BP}/icon-192.png`, sizes: "180x180", type: "image/png" }],
+    apple: [{ url: `${BP}/apple-touch-icon.png`, sizes: "180x180", type: "image/png" }],
   },
   appleWebApp: {
     capable: true,
     statusBarStyle: "default",
-    title: "Luz em Casa",
+    title: "LuzIA",
   },
 };
 

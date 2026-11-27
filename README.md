@@ -1,11 +1,12 @@
-# Luz em Casa
+# LuzIA
 
 Regista os consumos de eletricidade da tua casa (e do vizinho, e de quem mais
 vier), vê a evolução em gráficos, arquiva as faturas em PDF — a app lê-as
 sozinha — e compara as ofertas dos novos players com o comparador e o simulador
 da ERSE.
 
-**No ar em:** <https://luz-ia-lake.vercel.app/>
+**No ar em:** <https://luzia-app.vercel.app/> — o endereço antigo
+<https://luz-ia-lake.vercel.app/> continua a funcionar e leva ao mesmo sítio.
 
 ## Como funciona
 

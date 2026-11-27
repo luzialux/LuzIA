@@ -1,6 +1,6 @@
-// Service worker da Luz em Casa — deixa a app instalar-se no telemóvel e
+// Service worker da LuzIA — deixa a app instalar-se no telemóvel e
 // abrir mesmo sem internet (usa a última cópia guardada).
-const CACHE = "luz-em-casa-v2";
+const CACHE = "luzia-v1";
 
 self.addEventListener("install", () => {
   self.skipWaiting();

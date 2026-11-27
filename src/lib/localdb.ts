@@ -1,4 +1,4 @@
-// Base de dados da Luz em Casa — vive 100% dentro do navegador (IndexedDB).
+// Base de dados da LuzIA — vive 100% dentro do navegador (IndexedDB).
 // Substituiu o servidor: nada se perde se a internet falhar e não há contas
 // nem bases de dados na nuvem. As regras de guardar/calcular são as mesmas
 // que a app sempre usou.
