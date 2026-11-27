@@ -8,6 +8,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { del, put } from "@vercel/blob";
 
 export const dynamic = "force-dynamic";
+// desliga a cache de fetch do Next dentro desta rota
+export const fetchCache = "force-no-store";
 
 const MAX = 15 * 1024 * 1024; // o mesmo limite que a app já impõe no navegador
 

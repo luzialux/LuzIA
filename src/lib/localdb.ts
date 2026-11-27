@@ -923,6 +923,8 @@ async function carregarPdfNuvem(id: string): Promise<string | null> {
       hasPdf: true,
       updatedAt: inv.updatedAt ?? new Date().toISOString(),
     });
+    marcarDirty("invoices", id);
+    agendarEnvio();
     if (urlAntigo) void limparPdfNuvemUrl(urlAntigo);
     return r.url;
   } catch {
@@ -1053,39 +1055,37 @@ async function cicloSync(): Promise<void> {
   if (temTrabalho) definirEstado("a-sincronizar");
   const pdfFalhados: string[] = [];
   try {
-    let feito: { value?: string } | undefined;
-    try {
-      feito = await db().meta.get(CHAVE_FEITO);
-    } catch {
-      feito = undefined;
+    // 1) subir PDFs que estão na fila (só existem neste aparelho)
+    for (const id of [...(fila.get("invoices") ?? [])]) {
+      if ((await carregarPdfNuvem(id)) === null) pdfFalhados.push(id);
     }
-    const primeira = !sincInicialFeito && !feito;
 
-    if (primeira) {
-      const remoto = await puxar();
-      // migração: PDFs que só existem neste aparelho sobem para a nuvem
-      const todas = await db().invoices.toArray();
-      for (const inv of todas) {
-        if (inv.pdfData && !inv.pdfUrl) marcarDirty("invoices", inv.id);
-      }
-      // e tudo o que a nuvem ainda não conhece, sobe também
-      for (const t of TABELAS_SYNC) {
-        const todos = await tabelaDe(t).toArray();
-        for (const r of todos) {
-          if (!remoto || !remoto[t]?.[String(r.id)]) marcarDirty(t, String(r.id));
+    // 2) trazer a nuvem e juntar ao local
+    const remoto = await puxar();
+
+    // 3) reconciliar: tudo o que a nuvem não conhece sobe — é isto que faz a
+    //    primeira sincronização de um aparelho novo e que cura qualquer gravação
+    //    perdida entre dois aparelhos. Apagados noutra casa não ressuscitam.
+    const tumboAt = new Map<string, string>();
+    for (const tb of remoto?.deleted ?? []) tumboAt.set(`${tb.t}:${tb.id}`, tb.at);
+    for (const t of TABELAS_SYNC) {
+      const todos = await tabelaDe(t).toArray();
+      for (const r of todos) {
+        const id = String(r.id);
+        const at = (r as RegistoSync).updatedAt;
+        const tomba = tumboAt.get(`${t}:${id}`);
+        if (tomba && (!at || tomba >= at)) continue;
+        if (!remoto || !remoto[t]?.[id]) {
+          marcarDirty(t, id);
+        } else if (t === "invoices") {
+          const inv = r as unknown as LocalInvoice;
+          if (inv.pdfData && !inv.pdfUrl) marcarDirty(t, id);
         }
       }
-      for (const id of [...(fila.get("invoices") ?? [])]) {
-        if ((await carregarPdfNuvem(id)) === null) pdfFalhados.push(id);
-      }
-      await enviarFila();
-    } else {
-      for (const id of [...(fila.get("invoices") ?? [])]) {
-        if ((await carregarPdfNuvem(id)) === null) pdfFalhados.push(id);
-      }
-      await puxar();
-      await enviarFila();
     }
+
+    // 4) enviar tudo o que ficou marcado
+    await enviarFila();
 
     sincInicialFeito = true;
     try {
