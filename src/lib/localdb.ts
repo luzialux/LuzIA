@@ -15,7 +15,7 @@ import type {
   Operator,
   Reading,
 } from "./appTypes";
-import { parseInvoiceText } from "./invoice-parser";
+import { parseInvoiceText, type ParsedInvoice } from "./invoice-parser";
 import seedJson from "./seed-data.json";
 
 export type LocalInvoice = Invoice & {
@@ -328,10 +328,11 @@ export async function deleteOperator(id: string): Promise<void> {
 }
 
 // ---- faturas: ler o PDF no próprio navegador e arquivar ----
+const BASE = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
+
 async function extrairTextoPdf(file: File): Promise<string> {
   const pdfjs = await import("pdfjs-dist");
-  pdfjs.GlobalWorkerOptions.workerSrc =
-    (process.env.NEXT_PUBLIC_BASE_PATH ?? "") + "/pdf.worker.min.mjs";
+  pdfjs.GlobalWorkerOptions.workerSrc = BASE + "/pdf.worker.min.mjs";
   const dados = new Uint8Array(await file.arrayBuffer());
   const doc = await pdfjs.getDocument({ data: dados }).promise;
   const paginas: string[] = [];
@@ -346,6 +347,120 @@ async function extrairTextoPdf(file: File): Promise<string> {
   return paginas.join("\n");
 }
 
+// fatura fotografada/scansão? desenha as páginas no ecrã e lê-as à mão (OCR).
+// o tesseract.js carrega por cdn só quando é preciso (é pesado)
+async function ocrPdfTexto(file: File): Promise<string> {
+  const pdfjs = await import("pdfjs-dist");
+  pdfjs.GlobalWorkerOptions.workerSrc = BASE + "/pdf.worker.min.mjs";
+  const dados = new Uint8Array(await file.arrayBuffer());
+  const doc = await pdfjs.getDocument({ data: dados }).promise;
+  const Tesseract = await import("tesseract.js");
+  const worker = await Tesseract.createWorker("por");
+  try {
+    const paginas: string[] = [];
+    const maxPaginas = Math.min(doc.numPages, 5);
+    for (let p = 1; p <= maxPaginas; p++) {
+      const page = await doc.getPage(p);
+      const viewport = page.getViewport({ scale: 2 });
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.floor(viewport.width);
+      canvas.height = Math.floor(viewport.height);
+      const contexto = canvas.getContext("2d");
+      if (!contexto) throw new Error("sem canvas");
+      await page.render({ canvasContext: contexto, viewport }).promise;
+      const { data } = await worker.recognize(canvas);
+      paginas.push(data.text ?? "");
+    }
+    return paginas.join("\n");
+  } finally {
+    await worker.terminate();
+  }
+}
+
+// o resultado de tentar ler uma fatura — pode não conseguir tudo, e tudo bem
+export type ParsePdfOutcome = {
+  estado: "ok" | "protegido" | "ilegivel";
+  parsed: ParsedInvoice | null; // o que se conseguiu tirar do texto
+  usouOcr: boolean; // precisou de ler a imagem à mão?
+  motivo: string | null; // quando não consegue ler nada, explicar porquê
+};
+
+export async function parsePdfInvoice(
+  file: File,
+  onFase?: (fase: "texto" | "ocr") => void
+): Promise<ParsePdfOutcome> {
+  let texto = "";
+  let abriu = true;
+  try {
+    onFase?.("texto");
+    texto = await extrairTextoPdf(file);
+  } catch (e) {
+    abriu = false;
+    const nome = (e as { name?: string })?.name ?? "";
+    if (nome === "PasswordException" || /password/i.test(String(e))) {
+      return {
+        estado: "protegido",
+        parsed: null,
+        usouOcr: false,
+        motivo:
+          "Este PDF está protegido por palavra-passe (algumas empresas mandam assim, com o NIF). A app não consegue abri-lo — diz-me tu os valores em baixo e a fatura fica arquivada na mesma.",
+      };
+    }
+  }
+
+  // PDF sem texto = é uma imagem (scansão/fotografia) → OCR
+  let usouOcr = false;
+  if (!abriu || texto.trim().length < 250) {
+    onFase?.("ocr");
+    try {
+      const ocr = await ocrPdfTexto(file);
+      if (ocr.trim().length > 40) {
+        texto = ocr;
+        usouOcr = true;
+      }
+    } catch {
+      // sem internet para o OCR, ou falhou — seguimos com o que há
+    }
+    if (!abriu && !usouOcr) {
+      return {
+        estado: "ilegivel",
+        parsed: null,
+        usouOcr: false,
+        motivo:
+          "Não consegui abrir o PDF nem ler a imagem dele. Diz-me tu os valores em baixo e a fatura fica arquivada na mesma.",
+      };
+    }
+  }
+
+  const parsed = parseInvoiceText(texto);
+
+  // texto presente mas estragado (fontes esquisitas)? se não saiu nada, tenta
+  // o OCR por cima — é lento, por isso só quando vale a pena
+  if (
+    !usouOcr &&
+    parsed.month == null &&
+    parsed.kwh == null &&
+    parsed.costEur == null &&
+    texto.trim().length < 4000
+  ) {
+    onFase?.("ocr");
+    try {
+      const ocr = await ocrPdfTexto(file);
+      if (ocr.trim().length > 40) {
+        const p2 = parseInvoiceText(ocr);
+        if (p2.month != null || p2.kwh != null || p2.costEur != null) {
+          p2.notes.push("Lido por OCR (a fatura não tinha texto legível). Confere os valores.");
+          return { estado: "ok", parsed: p2, usouOcr: true, motivo: null };
+        }
+      }
+    } catch {
+      // ignora — seguimos com o que saiu do texto
+    }
+  }
+
+  return { estado: "ok", parsed, usouOcr, motivo: null };
+}
+
 export type ExtractResult = {
   month: number;
   year: number;
@@ -358,9 +473,13 @@ export type ExtractResult = {
   notes: string[];
 };
 
-export async function saveInvoiceFromPdf(
+// guarda a fatura no registo do mês e no arquivo (o PDF vai dentro). Os
+// valores vêm de fora: lidos do PDF pela app ou confirmados pelo utilizador
+// quando a leitura não saiu completa
+export async function saveInvoiceParsed(
   houseId: string,
-  file: File
+  file: File,
+  parsed: ParsedInvoice
 ): Promise<ExtractResult> {
   const d = db();
   const casa = await d.houses.get(houseId);
@@ -374,40 +493,24 @@ export async function saveInvoiceFromPdf(
   if (file.size > 15 * 1024 * 1024) {
     throw new Error("O ficheiro é demasiado grande (máx. 15 MB).");
   }
-
-  let texto = "";
-  try {
-    texto = await extrairTextoPdf(file);
-  } catch {
-    throw new Error(
-      "Não consegui abrir o PDF. Se for uma imagem/scancode, a app não consegue ler — nesse caso registra os valores à mão no separador «Registar»."
-    );
-  }
-
-  const parsed = parseInvoiceText(texto);
-  if (parsed.month == null || parsed.year == null) {
-    throw new Error(
-      "Li o PDF mas não encontrei o período de faturação nele. Confirma que carregaste a fatura da eletricidade (e não outro documento)."
-    );
-  }
-  if (parsed.kwh == null && parsed.costEur == null) {
-    throw new Error(
-      "Li o PDF mas não encontrei o consumo nem o valor. Podes registá-los à mão no separador «Registar»."
-    );
+  const ano = parsed.year;
+  const mes = parsed.month;
+  if (ano == null || mes == null) {
+    throw new Error("Falta o mês a que a fatura diz respeito.");
   }
 
   // 1) preencher o registo do mês (preservando o que já lá estava)
   const leituraExistente = await d.readings
     .where("[houseId+year+month]")
-    .equals([houseId, parsed.year, parsed.month])
+    .equals([houseId, ano, mes])
     .first();
   const registo: Reading = {
     id: leituraExistente?.id ?? crypto.randomUUID(),
     houseId,
     houseName: casa.name,
     houseColor: casa.color,
-    year: parsed.year,
-    month: parsed.month,
+    year: ano,
+    month: mes,
     kwh: parsed.kwh ?? leituraExistente?.kwh ?? null,
     costEur: parsed.costEur ?? leituraExistente?.costEur ?? null,
     counterValue: leituraExistente?.counterValue ?? null,
@@ -419,7 +522,7 @@ export async function saveInvoiceFromPdf(
   // 2) arquivar a fatura com o PDF dentro (o ficheiro novo substitui o antigo)
   const existente = await d.invoices
     .where("[houseId+year+month]")
-    .equals([houseId, parsed.year, parsed.month])
+    .equals([houseId, ano, mes])
     .first();
   const fatura: LocalInvoice = {
     id: existente?.id ?? crypto.randomUUID(),
@@ -428,8 +531,8 @@ export async function saveInvoiceFromPdf(
     houseColor: casa.color,
     fileName: file.name,
     fileSize: file.size,
-    year: parsed.year,
-    month: parsed.month,
+    year: ano,
+    month: mes,
     kwh: parsed.kwh ?? null,
     costEur: parsed.costEur ?? null,
     operatorName: parsed.operatorName,
@@ -450,8 +553,8 @@ export async function saveInvoiceFromPdf(
   agendarEnvio();
 
   return {
-    month: parsed.month,
-    year: parsed.year,
+    month: mes,
+    year: ano,
     kwh: parsed.kwh,
     costEur: parsed.costEur,
     operatorName: parsed.operatorName,
