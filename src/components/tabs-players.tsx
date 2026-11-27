@@ -191,13 +191,13 @@ export function PlayersTab({
         </div>
       </div>
 
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+      <div className="grid grid-cols-1 gap-4 @min-[768px]:grid-cols-2">
         {visible.map((op) => {
           const display = dark ? mix(op.brandColor, 0.35) : op.brandColor;
           return (
             <Card key={op.id} className="overflow-hidden">
               <div aria-hidden className="h-1.5 w-full" style={{ backgroundColor: op.brandColor }} />
-              <CardContent className="flex h-full flex-col gap-3 p-4 sm:p-5">
+              <CardContent className="flex h-full flex-col gap-3 p-4 @min-[640px]:p-5">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <a
                     href={op.website}
@@ -295,7 +295,7 @@ export function PlayersTab({
 
       {/* diálogo criar/editar operador */}
       <Dialog open={dialog != null} onOpenChange={(o) => !o && setDialog(null)}>
-        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-lg">
+        <DialogContent className="max-h-[90vh] overflow-y-auto @min-[640px]:max-w-lg">
           <DialogHeader>
             <DialogTitle>
               {dialog?.kind === "edit" ? "Editar oferta" : "Novo operador"}
@@ -305,7 +305,7 @@ export function PlayersTab({
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-4">
-            <div className="grid gap-2 sm:grid-cols-[1fr_auto] sm:items-end">
+            <div className="grid gap-2 @min-[640px]:grid-cols-[1fr_auto] @min-[640px]:items-end">
               <div className="grid gap-2">
                 <Label htmlFor="op-name">Nome do operador *</Label>
                 <Input
@@ -378,7 +378,7 @@ export function PlayersTab({
               />
             </div>
 
-            <div className="grid gap-4 sm:grid-cols-2">
+            <div className="grid gap-4 @min-[640px]:grid-cols-2">
               <div className="grid gap-2">
                 <Label htmlFor="op-bonus">Bónus (€)</Label>
                 <Input

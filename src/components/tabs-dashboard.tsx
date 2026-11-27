@@ -143,9 +143,9 @@ export function DashboardTab({
   }, [houses, readings]);
 
   return (
-    <div className="flex flex-col gap-4 sm:gap-6">
+    <div className="flex flex-col gap-4 @min-[640px]:gap-6">
       {/* cartões por casa */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+      <div className="grid grid-cols-1 gap-4 @min-[640px]:grid-cols-2">
         {kpi.map(({ house, last, delta, avg, yearOfLast }) => (
           <Card key={house.id} className="overflow-hidden">
             <div
@@ -153,7 +153,7 @@ export function DashboardTab({
               className="h-1.5 w-full"
               style={{ backgroundColor: house.color }}
             />
-            <CardContent className="p-4 sm:p-5">
+            <CardContent className="p-4 @min-[640px]:p-5">
               <div className="flex items-center gap-2">
                 <Home className="h-4 w-4 text-muted-foreground" aria-hidden />
                 <p className="font-semibold">{house.name}</p>
@@ -162,7 +162,7 @@ export function DashboardTab({
                 <>
                   <div className="mt-2 flex items-baseline justify-between gap-2">
                     <div>
-                      <p className="text-2xl font-bold tracking-tight sm:text-3xl">
+                      <p className="text-2xl font-bold tracking-tight @min-[640px]:text-3xl">
                         {fmtKwh(last.kwh)}
                       </p>
                       <p className="text-xs text-muted-foreground">
@@ -192,7 +192,7 @@ export function DashboardTab({
       {/* cartão de comparação entre casas */}
       {comparison && (
         <Card className="border-amber-300/60 dark:border-amber-500/30 bg-amber-50/60 dark:bg-amber-500/5">
-          <CardContent className="p-4 sm:p-5">
+          <CardContent className="p-4 @min-[640px]:p-5">
             <p className="text-sm text-muted-foreground">
               Comparação em {monthLabel(comparison.year, comparison.month)}
             </p>
@@ -214,7 +214,7 @@ export function DashboardTab({
       {/* gráfico de evolução mensal */}
       <Card>
         <CardHeader className="flex flex-row items-center justify-between gap-2 pb-2">
-          <CardTitle className="text-base sm:text-lg">
+          <CardTitle className="text-base @min-[640px]:text-lg">
             Evolução mensal {metric === "kwh" ? "(kWh)" : "(€)"}
           </CardTitle>
           <div className="flex gap-1" role="group" aria-label="Mudar unidade">
@@ -250,7 +250,7 @@ export function DashboardTab({
             ))}
           </div>
           <div
-            className="h-[260px] w-full text-muted-foreground sm:h-[320px]"
+            className="h-[260px] w-full text-muted-foreground @min-[640px]:h-[320px]"
             dir="ltr"
           >
             <ResponsiveContainer width="100%" height="100%">
@@ -293,7 +293,7 @@ export function DashboardTab({
       {/* barras lado a lado — últimos 12 meses */}
       <Card>
         <CardHeader className="pb-2">
-          <CardTitle className="text-base sm:text-lg">
+          <CardTitle className="text-base @min-[640px]:text-lg">
             Comparação lado a lado — últimos 12 meses (kWh)
           </CardTitle>
         </CardHeader>
@@ -311,7 +311,7 @@ export function DashboardTab({
             ))}
           </div>
           <div
-            className="h-[260px] w-full text-muted-foreground sm:h-[320px]"
+            className="h-[260px] w-full text-muted-foreground @min-[640px]:h-[320px]"
             dir="ltr"
           >
             <ResponsiveContainer width="100%" height="100%">

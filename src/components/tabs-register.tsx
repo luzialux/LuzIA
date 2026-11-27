@@ -144,7 +144,7 @@ export function RegisterTab({
     <div className="mx-auto flex w-full max-w-xl flex-col gap-4">
       {/* escolher a casa */}
       <Card>
-        <CardContent className="grid gap-4 p-4 sm:p-5">
+        <CardContent className="grid gap-4 p-4 @min-[640px]:p-5">
           <div className="grid gap-2">
             <Label htmlFor="house">Casa</Label>
             <Select value={houseId} onValueChange={setHouseId}>
@@ -182,7 +182,7 @@ export function RegisterTab({
             <CardHeader className="pb-2">
               <CardTitle className="text-base">Nova leitura do contador</CardTitle>
             </CardHeader>
-            <CardContent className="grid gap-4 p-4 sm:p-5">
+            <CardContent className="grid gap-4 p-4 @min-[640px]:p-5">
               <p className="text-sm text-muted-foreground">
                 Escreve o número que está no mostrador do contador de{" "}
                 {selectedHouse?.name ?? "a casa"} e a data em que leste. A app
@@ -200,7 +200,7 @@ export function RegisterTab({
                   em {MESES[lastCounter.month - 1]} de {lastCounter.year}.
                 </div>
               )}
-              <div className="grid gap-4 sm:grid-cols-2">
+              <div className="grid gap-4 @min-[640px]:grid-cols-2">
                 <div className="grid gap-2">
                   <Label htmlFor="date">Data da leitura</Label>
                   <Input
@@ -223,7 +223,7 @@ export function RegisterTab({
                   />
                 </div>
               </div>
-              <div className="grid gap-2 sm:max-w-[50%]">
+              <div className="grid gap-2 @min-[640px]:max-w-[50%]">
                 <Label htmlFor="counterCost">
                   Valor pago, se souberes (€) <span className="text-muted-foreground">(facultativo)</span>
                 </Label>
@@ -236,7 +236,7 @@ export function RegisterTab({
                   className="h-11"
                 />
               </div>
-              <Button onClick={submitCounter} disabled={saving} className="h-11 w-full sm:w-auto sm:self-start">
+              <Button onClick={submitCounter} disabled={saving} className="h-11 w-full @min-[640px]:w-auto @min-[640px]:self-start">
                 <Save className="mr-1.5 h-4 w-4" aria-hidden />
                 {saving ? "A guardar…" : "Guardar leitura"}
               </Button>
@@ -250,12 +250,12 @@ export function RegisterTab({
             <CardHeader className="pb-2">
               <CardTitle className="text-base">Fatura do mês</CardTitle>
             </CardHeader>
-            <CardContent className="grid gap-4 p-4 sm:p-5">
+            <CardContent className="grid gap-4 p-4 @min-[640px]:p-5">
               <p className="text-sm text-muted-foreground">
                 Sabes os kWh e o valor da fatura de um mês? Regista aqui — útil
                 para meses passados ou para juntar outras casas.
               </p>
-              <div className="grid gap-4 sm:grid-cols-2">
+              <div className="grid gap-4 @min-[640px]:grid-cols-2">
                 <div className="grid gap-2">
                   <Label htmlFor="month">Mês</Label>
                   <Select value={month} onValueChange={setMonth}>
@@ -287,7 +287,7 @@ export function RegisterTab({
                   </Select>
                 </div>
               </div>
-              <div className="grid gap-4 sm:grid-cols-2">
+              <div className="grid gap-4 @min-[640px]:grid-cols-2">
                 <div className="grid gap-2">
                   <Label htmlFor="kwh">Consumo (kWh)</Label>
                   <Input
@@ -311,7 +311,7 @@ export function RegisterTab({
                   />
                 </div>
               </div>
-              <Button onClick={submitBill} disabled={saving} className="h-11 w-full sm:w-auto sm:self-start">
+              <Button onClick={submitBill} disabled={saving} className="h-11 w-full @min-[640px]:w-auto @min-[640px]:self-start">
                 <Save className="mr-1.5 h-4 w-4" aria-hidden />
                 {saving ? "A guardar…" : "Guardar fatura"}
               </Button>

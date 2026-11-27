@@ -106,7 +106,7 @@ export function InvoicesTab({
     <div className="flex flex-col gap-4">
       {/* ---- carregar a fatura do mês ---- */}
       <Card>
-        <CardContent className="grid gap-4 p-4 sm:p-5">
+        <CardContent className="grid gap-4 p-4 @min-[640px]:p-5">
           <div>
             <h2 className="flex items-center gap-2 font-semibold">
               <Upload className="h-4 w-4 text-muted-foreground" aria-hidden />
@@ -118,7 +118,7 @@ export function InvoicesTab({
             </p>
           </div>
 
-          <div className="grid gap-4 sm:grid-cols-2">
+          <div className="grid gap-4 @min-[640px]:grid-cols-2">
             <div className="grid content-start gap-2">
               <Label htmlFor="fat-casa">Casa</Label>
               <Select value={houseId} onValueChange={setHouseId} disabled={semCasas}>
@@ -248,7 +248,7 @@ export function InvoicesTab({
           </CardContent>
         </Card>
       ) : (
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="grid grid-cols-1 gap-4 @min-[640px]:grid-cols-2 @min-[1024px]:grid-cols-3">
           {invoices.map((inv) => {
             const corMarca =
               MARCA[inv.operatorName ?? ""] ??

@@ -40,10 +40,10 @@ export function ErseTab({
   }, [houses, readings]);
 
   return (
-    <div className="flex flex-col gap-4 sm:gap-6">
+    <div className="flex flex-col gap-4 @min-[640px]:gap-6">
       <Card>
         <CardHeader className="pb-3">
-          <CardTitle className="flex items-center gap-2 text-base sm:text-lg">
+          <CardTitle className="flex items-center gap-2 text-base @min-[640px]:text-lg">
             <Zap className="h-5 w-5 text-amber-500" aria-hidden />
             Simulador oficial da ERSE
           </CardTitle>
@@ -56,7 +56,7 @@ export function ErseTab({
             obteres resultados à tua medida, escreve lá o consumo mensal das tuas
             casas:
           </p>
-          <ul className="grid gap-2 sm:grid-cols-2">
+          <ul className="grid gap-2 @min-[640px]:grid-cols-2">
             {averages.map(({ house, avg }) => (
               <li
                 key={house.id}
@@ -76,7 +76,7 @@ export function ErseTab({
               </li>
             ))}
           </ul>
-          <Button asChild className="h-12 w-full text-base sm:w-auto sm:self-start">
+          <Button asChild className="h-12 w-full text-base @min-[640px]:w-auto @min-[640px]:self-start">
             <a
               href={ERSE_SIMULATOR}
               target="_blank"
@@ -98,7 +98,7 @@ export function ErseTab({
 
       <Card>
         <CardHeader className="pb-3">
-          <CardTitle className="text-base sm:text-lg">
+          <CardTitle className="text-base @min-[640px]:text-lg">
             Operadores — sites oficiais
           </CardTitle>
         </CardHeader>
@@ -107,7 +107,7 @@ export function ErseTab({
             O nome de cada operador tem a <strong className="text-foreground">cor da
             marca</strong> e é um atalho para o site oficial.
           </p>
-          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
+          <div className="grid grid-cols-1 gap-2 @min-[640px]:grid-cols-2 @min-[1024px]:grid-cols-3">
             {operators.map((op) => {
               const display = dark ? mix(op.brandColor, 0.35) : op.brandColor;
               return (

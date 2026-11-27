@@ -157,7 +157,7 @@ export function HousesTab({
         </Button>
       </div>
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      <div className="grid grid-cols-1 gap-4 @min-[640px]:grid-cols-2 @min-[1024px]:grid-cols-3">
         {houses.map((h) => (
           <Card key={h.id} className="overflow-hidden">
             <div aria-hidden className="h-1.5 w-full" style={{ backgroundColor: h.color }} />
@@ -198,7 +198,7 @@ export function HousesTab({
 
       {/* ---- guardar e trazer os dados (cópia de segurança) ---- */}
       <Card>
-        <CardContent className="grid gap-4 p-4 sm:p-5">
+        <CardContent className="grid gap-4 p-4 @min-[640px]:p-5">
           <div>
             <h2 className="font-semibold">Os teus dados vivem neste aparelho</h2>
             <p className="mt-1 text-sm text-muted-foreground">
@@ -226,7 +226,7 @@ export function HousesTab({
       </Card>
 
       <Card>
-        <CardContent className="grid gap-3 p-4 sm:p-5">
+        <CardContent className="grid gap-3 p-4 @min-[640px]:p-5">
           <div>
             <h2 className="font-semibold">Trazer os teus dados</h2>
             <p className="mt-1 text-sm text-muted-foreground">
@@ -238,7 +238,7 @@ export function HousesTab({
           </div>
           <div className="flex flex-wrap items-center gap-3">
             <label
-              className="flex h-11 min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-md border border-dashed px-3 text-sm text-muted-foreground transition-colors hover:bg-accent sm:max-w-sm"
+              className="flex h-11 min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-md border border-dashed px-3 text-sm text-muted-foreground transition-colors hover:bg-accent @min-[640px]:max-w-sm"
             >
               <FileJson className="h-4 w-4 shrink-0" aria-hidden />
               <span className="truncate">
@@ -271,7 +271,7 @@ export function HousesTab({
 
       {/* diálogo criar/editar casa */}
       <Dialog open={dialog != null} onOpenChange={(o) => !o && setDialog(null)}>
-        <DialogContent className="sm:max-w-md">
+        <DialogContent className="@min-[640px]:max-w-md">
           <DialogHeader>
             <DialogTitle>{dialog?.kind === "edit" ? "Editar casa" : "Nova casa"}</DialogTitle>
             <DialogDescription>
@@ -307,7 +307,7 @@ export function HousesTab({
                     style={{ backgroundColor: c }}
                   />
                 ))}
-                <span className="mx-1 hidden h-6 w-px bg-border sm:block" aria-hidden />
+                <span className="mx-1 hidden h-6 w-px bg-border @min-[640px]:block" aria-hidden />
                 <label className="flex h-10 cursor-pointer items-center gap-2 rounded-md border px-3 text-sm text-muted-foreground hover:bg-accent">
                   <input
                     type="color"

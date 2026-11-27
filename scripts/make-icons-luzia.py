@@ -30,7 +30,11 @@ tile(192, 0.90).save(PUB + "icon-192.png", optimize=True)
 tile(180, 0.92).save(PUB + "apple-touch-icon.png", optimize=True)
 # ícone adaptável Android (zona segura ~80%)
 tile(512, 0.72).save(PUB + "icon-maskable-512.png", optimize=True)
+# favicon.ico clássico: recorte mais apertado para a lâmpada ficar legível
+ico = tile(48, 1.0, 0.16)
+ico.save(PUB + "favicon.ico", format="ICO", sizes=[(16, 16), (32, 32), (48, 48)], optimize=True)
 
-for n in ["logo-luzia.png", "icon-512.png", "icon-192.png", "apple-touch-icon.png", "icon-maskable-512.png"]:
+for n in ["logo-luzia.png", "icon-512.png", "icon-192.png", "apple-touch-icon.png", "icon-maskable-512.png", "favicon.ico"]:
     im = Image.open(PUB + n)
-    print(n, im.size, im.mode)
+    info = getattr(im, "info", {}).get("sizes", None) if n.endswith(".ico") else None
+    print(n, im.size, im.mode, ("tamanhos: " + str(info)) if info else "")

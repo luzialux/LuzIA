@@ -23,6 +23,9 @@ funcionar.
   Iberdrola, Plenitude, Goldenergy e outros).
 - **Casas** — adicionar/renomear casas, cores nos gráficos, cópia de segurança
   (exportar/importar um `.json` com tudo, PDFs incluídos).
+- **Vista telemóvel / PC** — dois botões no topo mostram a app como ela fica
+  no telemóvel ou no computador, mesmo que estejas no outro aparelho (clicar
+  de novo volta à vista automática).
 - **ERSE** — ligação ao simulador oficial para comparar tarifas.
 - **Ofertas** — comparador dos novos players, com valores editáveis.
 

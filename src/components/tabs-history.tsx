@@ -104,7 +104,7 @@ export function HistoryTab({
   return (
     <Card>
       <CardHeader className="flex flex-row items-center justify-between gap-2 pb-3">
-        <CardTitle className="text-base sm:text-lg">
+        <CardTitle className="text-base @min-[640px]:text-lg">
           Registos <span className="text-muted-foreground">({filtered.length})</span>
         </CardTitle>
         <Select value={houseFilter} onValueChange={setHouseFilter}>
@@ -119,7 +119,7 @@ export function HistoryTab({
           </SelectContent>
         </Select>
       </CardHeader>
-      <CardContent className="p-0 sm:p-6 sm:pt-0">
+      <CardContent className="p-0 @min-[640px]:p-6 @min-[640px]:pt-0">
         {filtered.length === 0 ? (
           <p className="p-6 text-center text-sm text-muted-foreground">
             Ainda não há registos{years.length ? "" : " — começa no separador «Registar»"}.
@@ -129,18 +129,18 @@ export function HistoryTab({
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead className="pl-4 sm:pl-0">Mês</TableHead>
+                  <TableHead className="pl-4 @min-[640px]:pl-0">Mês</TableHead>
                   <TableHead>Casa</TableHead>
                   <TableHead className="text-right">Consumo</TableHead>
                   <TableHead className="text-right">Valor</TableHead>
-                  <TableHead className="hidden text-right sm:table-cell">Contador</TableHead>
-                  <TableHead className="w-24 pr-4 sm:pr-0">Ações</TableHead>
+                  <TableHead className="hidden text-right @min-[640px]:table-cell">Contador</TableHead>
+                  <TableHead className="w-24 pr-4 @min-[640px]:pr-0">Ações</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {filtered.map((r) => (
                   <TableRow key={r.id}>
-                    <TableCell className="whitespace-nowrap pl-4 font-medium sm:pl-0">
+                    <TableCell className="whitespace-nowrap pl-4 font-medium @min-[640px]:pl-0">
                       {monthLabelLong(r.year, r.month)}
                     </TableCell>
                     <TableCell>
@@ -155,10 +155,10 @@ export function HistoryTab({
                     </TableCell>
                     <TableCell className="text-right tabular-nums">{fmtKwh(r.kwh)}</TableCell>
                     <TableCell className="text-right tabular-nums">{fmtEur(r.costEur)}</TableCell>
-                    <TableCell className="hidden text-right tabular-nums text-muted-foreground sm:table-cell">
+                    <TableCell className="hidden text-right tabular-nums text-muted-foreground @min-[640px]:table-cell">
                       {fmtCounter(r.counterValue)}
                     </TableCell>
-                    <TableCell className="pr-4 sm:pr-0">
+                    <TableCell className="pr-4 @min-[640px]:pr-0">
                       <div className="flex justify-end gap-1">
                         <Button
                           variant="ghost"
@@ -190,7 +190,7 @@ export function HistoryTab({
 
       {/* diálogo de edição */}
       <Dialog open={editing != null} onOpenChange={(o) => !o && setEditing(null)}>
-        <DialogContent className="sm:max-w-md">
+        <DialogContent className="@min-[640px]:max-w-md">
           <DialogHeader>
             <DialogTitle>Corrigir registo</DialogTitle>
             <DialogDescription>
